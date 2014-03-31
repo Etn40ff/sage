@@ -22,6 +22,9 @@ from sage.all import matrix
 from sage.combinat.cluster_algebra_quiver.quiver import ClusterQuiver
 from sage.combinat.permutation import Permutations
 from sage.misc.cachefunc import cached_method
+from sage.rings.infinity import infinity
+from sage.rings.rational_field import QQ
+from sage.modules.free_module_element import vector
 
 class TropicalClusterAlgebra(SageObject):
     r"""
@@ -30,7 +33,8 @@ class TropicalClusterAlgebra(SageObject):
     The init function should be changed in order to be more consistent with
     ClusterSeed and QuiverMutationType
     """
-    def __init__(self, data, coxeter=None):
+    def __init__(self, data, coxeter=None, mutation_type=None):
+        self._mutation_type=mutation_type
         if isinstance(data, Matrix):
             if not data.is_skew_symmetrizable():
                 raise ValueError("The input must be a skew symmetrizable integer matrix")
@@ -39,30 +43,35 @@ class TropicalClusterAlgebra(SageObject):
             self._coxeter=None
             self._n=self._B.ncols()
         elif isinstance(data, CartanType_abstract):
+            self._n=data.rank()
+            # force labeling to be range(self._n)
+            # I should fix this to allow any labeling but I still need to figure
+            # out how to deal with matrices (it will require major refactoring)
+            relabeling=dict(zip(data.index_set(),range(self._n)))
+            self._cartan_type=data.relabel(relabeling)
             if coxeter==None:
-                coxeter=range(data.rank())
-            self._cartan_type=copy(data)
-            self._B=2-data.cartan_matrix()
-            self._n=self._B.ncols()
-            if Set(coxeter)!=Set(range(self._n)):
+                coxeter=list(data.index_set())
+            if Set(coxeter)!=Set(data.index_set()):
                 raise ValueError("The Coxeter element need to be a list"
-                                 "permutation the  dimension of the root space"
-                                 "of the Cartan type")
+                                 "permiting the entry of the index set of the Cartan type")
+            coxeter=[ relabeling[i] for i in coxeter ]
+            self._B=2-data.cartan_matrix()
             for i in range(self._n):
                 for j in range(i,self._n):
                     self._B[coxeter[j],coxeter[i]]=-self._B[coxeter[j],coxeter[i]]
             self._coxeter=copy(coxeter)
         elif type(data) in [QuiverMutationType_Irreducible, QuiverMutationType_Reducible]:
-            raise ValueError("Not implemented yet")
+            self.__init__(data.b_matrix(),mutation_type=data)
         elif type(data)==list:
             self.__init__(CartanType(data),coxeter=coxeter)
         else:
             raise ValueError("Input is not valid")
         self._A=CartanMatrix(2-matrix(self._n,map(abs,self._B.list())))
-        self._description = 'A combinatorial model for cluster algebra of rank %d' %(self._n)
-        self._mutation_type=None
         self._quiver=None
-        self._root_lattice=None
+        self._root_space=None
+        self._d_vectors=[None,None]
+        self._delta=None
+        self._gamma=None
         #self._symmetrizer=None
         #self._scalar_product=None
         #self._s=[None for i in range(self._n)]
@@ -89,19 +98,22 @@ class TropicalClusterAlgebra(SageObject):
             r"""
             Returns the description of ``self``.
             """
-            return copy(self._description)
+            description = 'A combinatorial model for a cluster algebra of rank %d' %(self._n)
+            if self._mutation_type:
+                description += ' and type %s' %(self._mutation_type)
+            return description
 
     def b_matrix(self):
         r"""
         Returns the `B` *-matrix* of ``self``.
         """
-        return copy(self._B)
+        return self._B
 
     def cartan_companion(self):
         r"""
         Returns the `Cartan Companion` of ``self``.
         """
-        return copy(self._A)
+        return self._A
 
     def quiver(self):                                                                                                                                                     
         r"""
@@ -109,6 +121,11 @@ class TropicalClusterAlgebra(SageObject):
         """
         if self._quiver is None:
             self._quiver = ClusterQuiver( self._B )
+            # hack: ClusterQuiver can't determine type affine type D so if we
+            # already know the mutation type we do not forget it. 
+            # This might create issues with forged imputs
+            if self._mutation_type:
+                self._quiver._mutation_type = self._mutation_type
         return self._quiver
 
     def show(self):
@@ -149,12 +166,19 @@ class TropicalClusterAlgebra(SageObject):
             return False
         else:
             return mt.is_affine()
+        
+    def is_acyclic(self):
+        r"""
+        Returns True iff self is acyclic (i.e., if the underlying quiver is acyclic).
+        Taken from ClusterSeed
+        """
+        return self.quiver()._digraph.is_directed_acyclic()
 
     def cartan_type(self):
         r"""
         Returns the Cartan type of the Cartan companion of self.b_matrix()
 
-        Only chrystallographics are implemented
+        Only crystallographic types are implemented
         """
         if self._cartan_type:
             return self._cartan_type
@@ -216,10 +240,13 @@ class TropicalClusterAlgebra(SageObject):
     def dynkin_diagram(self):
         return self.cartan_type().dynkin_diagram()
 
-    def root_lattice(self):
-        if self._root_lattice == None:
-            self._root_lattice = self.cartan_type().root_system().root_lattice()
-        return copy(self._root_lattice)
+    def root_space(self):
+        if self._root_space == None:
+            self._root_space = self.cartan_type().root_system().root_space(QQ)
+        return copy(self._root_space)
+    
+    def initial_cluster(self):
+        return [ -v for v in self.root_space().simple_roots() ]
 
     def coxeter(self):
         r"""
@@ -230,7 +257,6 @@ class TropicalClusterAlgebra(SageObject):
         Sources == non positive columns == leftmost letters
         """
         if not self._coxeter:
-            from sage.modules.free_module_element import vector
             zero_vector=vector([0 for x in range(self._n)])
             self._coxeter=[]
             B=copy(self._B)
@@ -256,17 +282,37 @@ class TropicalClusterAlgebra(SageObject):
     
     @cached_method    
     def simple_reflection(self,i):
-        return self.root_lattice().simple_reflection(i)
+        return self.root_space().simple_reflection(i)
 
     @cached_method    
     def simple_reflections(self):
-        return self.root_lattice().simple_reflections()
+        return self.root_space().simple_reflections()
+
+    @cached_method
+    def c(self):
+        def f(v):
+            sequence=self.coxeter()
+            sequence.reverse()
+            for i in sequence:
+                v=self.simple_reflection(i)(v)
+            return v
+        return f
+
+    @cached_method
+    def c_inverse(self):
+        def f(v):
+            sequence=self.coxeter()
+            for i in sequence:
+                v=self.simple_reflection(i)(v)
+            return v
+        return f
 
     @cached_method    
     def twisted_reflection(self,i):
         def sigma_i(alpha):
-            not_i = [ x for x in range(self._n) if x != i]
-            fixed=sum([alpha.coefficient(j)*self.root_lattice().simple_root(j) 
+            index_set = self.root_space().index_set()
+            not_i = [ x for x in index_set if x != i]
+            fixed=sum([alpha.coefficient(j)*self.root_space().simple_root(j) 
                 for j in not_i if alpha.coefficient(j) < 0])
             alpha=alpha-fixed
             return self.simple_reflection(i)(alpha)+fixed
@@ -276,4 +322,124 @@ class TropicalClusterAlgebra(SageObject):
     def twisted_reflections(self):
         return [ self.twisted_reflection(i) for i in range(self._n) ]
 
+    @cached_method
+    def tau_c(self):
+        def f(v):
+            sequence=self.coxeter()
+            sequence.reverse()
+            for i in sequence:
+                v=self.twisted_reflection(i)(v)
+            return v
+        return f
+
+    @cached_method
+    def tau_c_inverse(self):
+        def f(v):
+            sequence=self.coxeter()
+            for i in sequence:
+                v=self.twisted_reflection(i)(v)
+            return v
+        return f
+    
+    def delta(self):
+        """r
+        Assume roots are labeled by range(self._n)
+        """
+        if self._delta:
+            return self._delta
+        if self.is_affine():
+            annihilator_basis = self.cartan_companion().transpose().integer_kernel().gens()
+            self._delta = sum(
+                    annihilator_basis[0][i]*self.root_space().simple_root(i)
+                    for i in range(self._n) )
+            return  self._delta
+        else:
+            raise ValueError("delta is defined only for affine types")
+
+    def gamma(self):
+        """r
+        Assume roots are labeled by range(self._n)
+        Return the generalized eigenvector of the cartan matrix of eigenvalue 1
+        in the span of the finite root system
+        """
+        if self._gamma:
+            return self._gamma
+        if self.is_affine():
+            C = map( lambda x: vector(self.c()(x)), self.root_space().simple_roots() ) 
+            C = matrix(C).transpose()
+            delta = vector(self.delta())
+            gamma = (C-1).solve_right(delta)
+            ct = self.cartan_type()
+            i0 = [ i for i in ct.index_set() if i not in ct.classical().index_set() ][0]
+            gamma = gamma-gamma[i0]/delta[i0]*delta
+            self._gamma = sum( [ gamma[i]*self.root_space().simple_root(i) for
+                i in range(self._n) ] )
+            return self._gamma
+        else:
+            raise ValueError("gamma is defined only for affine types")
+
+    def d_vectors(self,depth=infinity):
+        if self._d_vectors[0] == depth:
+            return copy(self._d_vectors[1])
+
+        if self.is_finite():
+            if self.is_acyclic():
+                self._d_vectors[0] = infinity
+                self._d_vectors[1] = self.root_space().almost_positive_roots()
+            else:
+                raise ValueError("Not implemented yet")
+        elif self.is_affine():
+            if self.is_acyclic():
+                if depth is infinity:
+                    raise ValueError("d_vectors, for affine types, can only be "
+                                     "computed up to a given depth")
+                self._d_vectors[0] = depth
+                self._d_vectors[1] = list( S for S in self._affine_acyclic_type_d_vectors_iter(depth=depth))
+            else: 
+                raise ValueError("There is no theory for cyclic affine types yet")
+        else:
+            raise ValueError("Not implemented yet")
+        
+        return copy(self._d_vectors[1])
+
+    def _affine_acyclic_type_d_vectors_iter(self,depth=infinity):
+        depth_counter=0
+        d_vectors={}
+        for v in self.root_space().simple_roots():
+            d_vectors[-v]=["forward","backward"]
+        ###
+        # FixMe: there is some redundancy here 
+        #        it should be fixed by selecting only one root per finite orbit
+        for v in self._affine_acyclic_type_classical_roots_in_finite_orbits():
+            d_vectors[v]=["forward"]
+        gets_bigger=True
+        while gets_bigger and depth_counter <= depth:
+            gets_bigger=False
+            constructed_vectors = d_vectors.keys()
+            for v in constructed_vectors:
+                directions=d_vectors[v]
+                while directions:
+                    next_move=directions.pop()
+                    if next_move == "forward":
+                        next_vector =  self.tau_c()(v)
+                        if next_vector not in d_vectors.keys():
+                            d_vectors[next_vector]=["forward"]
+                            gets_bigger=True
+                    if next_move == "backward":
+                        next_vector = self.tau_c_inverse()(v)
+                        if next_vector not in d_vectors.keys():
+                            d_vectors[next_vector]=["backward"]
+                            gets_bigger=True
+                    if directions:
+                        continue
+                    yield v
+            depth_counter+=1        
+    
+    def _affine_acyclic_type_classical_roots_in_finite_orbits(self):
+        rs = self.root_space()
+        crs = rs.classical()
+        injection = crs.module_morphism(on_basis=lambda i: rs.simple_root(i),codomain=rs)
+        classical_roots = [ injection(x) for x in crs.positive_roots() ]
+        gammacheck = self.gamma().associated_coroot()
+        return [ x for x in classical_roots if gammacheck.scalar(x) == 0 ]
 
