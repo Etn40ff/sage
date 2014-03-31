@@ -193,3 +193,6 @@ from binary_recurrence_sequences import BinaryRecurrenceSequence
 # Six Vertex Model
 lazy_import('sage.combinat.six_vertex_model', 'SixVertexModel')
 
+# Tropical model for cluster agebras
+from tropical_cluster_algebra.all import *
+
