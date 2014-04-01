@@ -3,7 +3,7 @@ Tropicalized version of cluster algebras
 
 AUTHORS:
 
-- Salvatore Stella 
+- Salvatore Stella
 """
 #*****************************************************************************
 #       Copyright (C) 2013 Salvatore Stella <sstella@ncsu.edu>
@@ -25,6 +25,7 @@ from sage.misc.cachefunc import cached_method
 from sage.rings.infinity import infinity
 from sage.rings.rational_field import QQ
 from sage.modules.free_module_element import vector
+from sage.combinat.subset import Subsets
 
 class TropicalClusterAlgebra(SageObject):
     r"""
@@ -70,29 +71,10 @@ class TropicalClusterAlgebra(SageObject):
         self._quiver=None
         self._root_space=None
         self._d_vectors=[None,None]
+        self._clusters=[None,None]
         self._delta=None
         self._gamma=None
-        #self._symmetrizer=None
-        #self._scalar_product=None
-        #self._s=[None for i in range(self._n)]
-        #self._sigma=[None for i in range(self._n)]
-        #self._coxeter_matrix=None
-        #self._coxeter_translation=None
-        #self._coxeter_translation_inverse=None
-        #self._finite_orbits=None
-        #self._finite_cone=None
-        #self._tubes=None
-        #self._tubes_dict=None
-        #self._clusters=None
-        #self._s_w=[None for i in range(self._n)]
-        #self._sigma_w=[None for i in range(self._n)]
-        #self._coxeter_translation_w=None
-        #self._coxeter_translation_w_inverse=None
-        #self._coxeter_matrix_w=None
-        #self._g_vectors=None
-        #self._clusters_w=None
-        ## To be removed
-        #self._compatibility_degree=dict()
+        self._affine_tubes=None
 
     def _repr_(self):
             r"""
@@ -115,14 +97,14 @@ class TropicalClusterAlgebra(SageObject):
         """
         return self._A
 
-    def quiver(self):                                                                                                                                                     
+    def quiver(self):
         r"""
         Taken from the cluster algebra package
         """
         if self._quiver is None:
             self._quiver = ClusterQuiver( self._B )
             # hack: ClusterQuiver can't determine type affine type D so if we
-            # already know the mutation type we do not forget it. 
+            # already know the mutation type we do not forget it.
             # This might create issues with forged imputs
             if self._mutation_type:
                 self._quiver._mutation_type = self._mutation_type
@@ -135,7 +117,7 @@ class TropicalClusterAlgebra(SageObject):
         r"""
         Taken from the cluster algebra package
         ######
-        ## WARNING: issues with 
+        ## WARNING: issues with
         sage: ct=CartanType(['D', 7, 1])
         sage: T=TropicalClusterAlgebra(ct,[1,7,6,5,4,3,2,0])
         Apparently D is not a recognized quiver mutation type
@@ -146,7 +128,7 @@ class TropicalClusterAlgebra(SageObject):
                 self.quiver()
             self._mutation_type = self._quiver.mutation_type()
         return self._mutation_type
-         
+
     def is_finite(self):
         r"""
         Taken from the cluster algebra package
@@ -156,7 +138,7 @@ class TropicalClusterAlgebra(SageObject):
             return False
         else:
             return mt.is_finite()
-         
+
     def is_affine(self):
         r"""
         Inspiration taken from cluster algebra package
@@ -166,7 +148,7 @@ class TropicalClusterAlgebra(SageObject):
             return False
         else:
             return mt.is_affine()
-        
+
     def is_acyclic(self):
         r"""
         Returns True iff self is acyclic (i.e., if the underlying quiver is acyclic).
@@ -179,6 +161,9 @@ class TropicalClusterAlgebra(SageObject):
         Returns the Cartan type of the Cartan companion of self.b_matrix()
 
         Only crystallographic types are implemented
+
+        Warning: this function is redundant but the corresonding method in
+        CartanType does not recognize all the types
         """
         if self._cartan_type:
             return self._cartan_type
@@ -186,7 +171,7 @@ class TropicalClusterAlgebra(SageObject):
         n=self._n
         degrees_dict=dict(zip(range(n),map(sum,2-A)))
         degrees_set=Set(degrees_dict.values())
-    
+
         types_to_check=[ ["A",n] ]
         if n > 1:
             types_to_check.append(["B",n])
@@ -244,7 +229,7 @@ class TropicalClusterAlgebra(SageObject):
         if self._root_space == None:
             self._root_space = self.cartan_type().root_system().root_space(QQ)
         return copy(self._root_space)
-    
+
     def initial_cluster(self):
         return [ -v for v in self.root_space().simple_roots() ]
 
@@ -253,7 +238,7 @@ class TropicalClusterAlgebra(SageObject):
         Returns a list expressing the coxeter element corresponding to self._B
         (twisted) reflections are applied from top of the list, for example
         [2, 1, 0] correspond to s_2s_1s_0
-        
+
         Sources == non positive columns == leftmost letters
         """
         if not self._coxeter:
@@ -264,10 +249,10 @@ class TropicalClusterAlgebra(SageObject):
             source=None
             for j in range(self._n):
                 for i in range(self._n):
-                    if all(x <=0 for x in columns[i]) and columns[i] != zero_vector: 
+                    if all(x <=0 for x in columns[i]) and columns[i] != zero_vector:
                         source=i
                         break
-                if source == None: 
+                if source == None:
                     if B != matrix(self._n):
                         raise ValueError("Unable to find a Coxeter element representing self._B")
                     self._coxeter+=[ x for x in range(self._n) if x not in self._coxeter]
@@ -279,12 +264,12 @@ class TropicalClusterAlgebra(SageObject):
                 columns=B.columns()
                 source=None
         return copy(self._coxeter)
-    
-    @cached_method    
+
+    @cached_method
     def simple_reflection(self,i):
         return self.root_space().simple_reflection(i)
 
-    @cached_method    
+    @cached_method
     def simple_reflections(self):
         return self.root_space().simple_reflections()
 
@@ -307,18 +292,18 @@ class TropicalClusterAlgebra(SageObject):
             return v
         return f
 
-    @cached_method    
+    @cached_method
     def twisted_reflection(self,i):
         def sigma_i(alpha):
             index_set = self.root_space().index_set()
             not_i = [ x for x in index_set if x != i]
-            fixed=sum([alpha.coefficient(j)*self.root_space().simple_root(j) 
+            fixed=sum([alpha.coefficient(j)*self.root_space().simple_root(j)
                 for j in not_i if alpha.coefficient(j) < 0])
             alpha=alpha-fixed
             return self.simple_reflection(i)(alpha)+fixed
         return sigma_i
 
-    @cached_method    
+    @cached_method
     def twisted_reflections(self):
         return [ self.twisted_reflection(i) for i in range(self._n) ]
 
@@ -340,7 +325,7 @@ class TropicalClusterAlgebra(SageObject):
                 v=self.twisted_reflection(i)(v)
             return v
         return f
-    
+
     def delta(self):
         """r
         Assume roots are labeled by range(self._n)
@@ -365,7 +350,7 @@ class TropicalClusterAlgebra(SageObject):
         if self._gamma:
             return self._gamma
         if self.is_affine():
-            C = map( lambda x: vector(self.c()(x)), self.root_space().simple_roots() ) 
+            C = map( lambda x: vector(self.c()(x)), self.root_space().simple_roots() )
             C = matrix(C).transpose()
             delta = vector(self.delta())
             gamma = (C-1).solve_right(delta)
@@ -395,23 +380,22 @@ class TropicalClusterAlgebra(SageObject):
                                      "computed up to a given depth")
                 self._d_vectors[0] = depth
                 self._d_vectors[1] = list( S for S in self._affine_acyclic_type_d_vectors_iter(depth=depth))
-            else: 
+            else:
                 raise ValueError("There is no theory for cyclic affine types yet")
         else:
             raise ValueError("Not implemented yet")
-        
+
         return copy(self._d_vectors[1])
 
     def _affine_acyclic_type_d_vectors_iter(self,depth=infinity):
         depth_counter=0
         d_vectors={}
+        delta=self.delta()
         for v in self.root_space().simple_roots():
             d_vectors[-v]=["forward","backward"]
-        ###
-        # FixMe: there is some redundancy here 
-        #        it should be fixed by selecting only one root per finite orbit
         for v in self._affine_acyclic_type_classical_roots_in_finite_orbits():
-            d_vectors[v]=["forward"]
+            d_vectors[v]=[None]
+            d_vectors[delta-v]=[None]
         gets_bigger=True
         while gets_bigger and depth_counter <= depth:
             gets_bigger=False
@@ -433,8 +417,8 @@ class TropicalClusterAlgebra(SageObject):
                     if directions:
                         continue
                     yield v
-            depth_counter+=1        
-    
+            depth_counter+=1
+
     def _affine_acyclic_type_classical_roots_in_finite_orbits(self):
         rs = self.root_space()
         crs = rs.classical()
@@ -443,3 +427,217 @@ class TropicalClusterAlgebra(SageObject):
         gammacheck = self.gamma().associated_coroot()
         return [ x for x in classical_roots if gammacheck.scalar(x) == 0 ]
 
+    def ith_orbit(self, i, depth=infinity):
+        if depth is infinity and not self.is_finite():
+            raise ValueError("d_vectors, for infinite types, can only be computed up to a given depth")
+        depth_counter=0
+        orbit={}
+        orbit[0]=self.initial_cluster()[i]
+        gets_bigger=True
+        while gets_bigger and depth_counter < depth:
+            gets_bigger=False
+            forward=self.tau_c()(orbit[depth_counter])
+            backward=self.tau_c_inverse()(orbit[-depth_counter])
+            if forward != orbit[-depth_counter]:
+                depth_counter+=1
+                orbit[depth_counter]=forward
+                if backward != forward:
+                    orbit[-depth_counter]=backward
+                    gets_bigger=True
+        return orbit
+
+    def affine_tubes(self):
+        if self._affine_tubes:
+            return copy(self._affine_tubes)
+        if not self.is_affine():
+            raise ValueError("Tubes exist only when the type of self is affine")
+        finite_roots = self._affine_acyclic_type_classical_roots_in_finite_orbits()
+        sums = [ x+y for (x,y) in Subsets(finite_roots,2) ]
+        simple_roots=[ x for x in finite_roots if x not in sums]
+        tau=self.tau_c()
+        tau_inv=self.tau_c_inverse()
+        initial_roots=[ x for x in simple_roots if tau_inv(x) not in simple_roots ]
+        tubes=[]
+        for a in initial_roots:
+            layer=[a]
+            h=0
+            x=tau(a)
+            while x != a:
+                h+=1
+                layer.append(x)
+                x=tau(x)
+            tube=[layer]
+            for i in range(1,h):
+                a=tube[i-1][0]+tube[0][i]
+                layer=[a]
+                x=tau(a)
+                while x != a:
+                    layer.append(x)
+                    x=tau(x)
+                tube.append(layer)
+            tubes.append(tube)
+        self._affine_tubes=tubes
+        return copy(self._affine_tubes)
+
+    @cached_method
+    def compatibility_degree(self, alpha, beta):
+        if alpha in self.initial_cluster():
+            return max(beta[alpha.support()[0]],0)
+
+        alphacheck = alpha.associated_coroot()
+
+        if beta in self.initial_cluster():
+            return max(alphacheck[beta.support()[0]],0)
+
+        Ap = -matrix(self._n, map(lambda x: max(x,0), self.b_matrix().list() ) )
+        Am =  matrix(self._n, map(lambda x: min(x,0), self.b_matrix().list() ) )
+
+        a = vector(alphacheck)
+        b = vector(beta)
+
+        return max( -a*b-a*Am*b, -a*b-a*Ap*b, 0 )
+
+    def clusters(self, depth=infinity):
+        if self._clusters[0] != depth:
+
+            def compatible_following(l):
+                out=[]
+                while l:
+                    x=l.pop()
+                    comp_with_x=[y for y in l if self.compatibility_degree(x,y)==0]
+                    if comp_with_x != []:
+                        out.append((x,comp_with_x))
+                    else:
+                        out.append((x,))
+                return out
+
+            d_vectors = self.d_vectors(depth=depth)
+            clusters = compatible_following(d_vectors)
+            done = False
+            while not done:
+                new = []
+                done = True
+                for clus in clusters:
+                    if type(clus[-1]) == list:
+                        done = False
+                        for y in compatible_following(clus[-1]):
+                            new.append(clus[:-1]+y)
+                    else:
+                        new.append(clus)
+                clusters = copy(new)
+            self._clusters = [depth,[ x for x in  clusters if len(x) == self._n]]
+
+        return copy(self._clusters[1])
+
+    def plot_cluster_fan_stereographically(self,depth=infinity,northsign=1,north=None,right=None):
+        from sage.plot.graphics import Graphics
+        from sage.plot.point import point
+        from sage.misc.flatten import flatten
+
+        if self._n !=3:
+            raise ValueError("Can only stereographically project fans in 3d.")
+        if not self.is_finite() and depth==infinity:
+            raise ValueError("For infinite algebras you must specify the depth.")
+        
+        if north == None:
+            if self.is_affine():
+                north = vector(self.delta())
+            else:
+                north = vector( (-1,-1,-1) )
+        if right == None:
+            if self.is_affine():
+                right = vector(self.gamma())
+            else:
+                right = vector( (1,0,0) )
+        colors = dict([(0,'red'),(1,'green'),(2,'blue'),(3,'cyan')])
+        G = Graphics()
+
+        roots = self.d_vectors(depth=depth)
+        compatible = []
+        while roots:
+            x = roots.pop()
+            for y in roots:
+                if self.compatibility_degree(x,y) == 0:
+                    compatible.append((x,y))
+        for (u,v) in compatible:
+            G += _stereo_arc(vector(u),vector(v),vector(u+v),north=northsign*north,right=right,thickness=0.5,color='black')
+
+        for i in range(3):
+            orbit = self.ith_orbit(i,depth=depth)                                                                               
+            for j in orbit:
+                G += point(_stereo_coordinates(vector(orbit[j]),north=northsign*north,right=right),color=colors[i],zorder=len(G))
+        
+        if self.is_affine():
+            for v in flatten(self.affine_tubes()):
+                G += point(_stereo_coordinates(vector(v),north=northsign*north,right=right),color=colors[3],zorder=len(G))
+
+        G.set_aspect_ratio(1)
+        G._show_axes = False
+        return G
+
+
+#####
+# Helper functions
+#####
+def _stereo_coordinates(x, north=(1,0,0), right=(0,1,0), translation=-1):
+    r"""
+    Project stereographically points from a sphere
+    """
+    from sage.misc.functional import norm
+    north=_normalize(north)
+    right=vector(right)
+    right=_normalize(right-(right*north)*north)
+    if norm(right) == 0: 
+        raise ValueError ("Right must not be linearly dependent from north")
+    top=north.cross_product(right)
+    x=_normalize(x)
+    p=(translation-north*x)/(1-north*x)*(north-x)+x
+    return vector((right*p, top*p ))
+
+def _normalize(x):
+    r"""
+    make x of length 1
+    """
+    from sage.misc.functional import norm
+    x=vector(x)
+    if norm(x) == 0:
+        return x
+    return vector(x/norm(x))
+
+def _stereo_arc(x,y, xy=None,  north=(1,0,0), right=(0,1,0), translation=-1, **kwds):
+    from sage.misc.functional import norm, det, n
+    from sage.plot.line import line
+    from sage.plot.plot import parametric_plot
+    from sage.functions.trig import arccos, cos, sin
+    from sage.symbolic.constants import NaN
+    from sage.calculus.var import var
+    x=vector(x)
+    y=vector(y)
+    sx=n(_stereo_coordinates(x, north=north, right=right, translation=translation))
+    sy=n(_stereo_coordinates(y, north=north, right=right, translation=translation))
+    if xy == None:
+        sxy=n(_stereo_coordinates(x+y, north=north, right=right, translation=translation))
+    else:
+        sxy=n(_stereo_coordinates(xy, north=north, right=right, translation=translation))
+    m0=-matrix(3,[sx[0]**2+sx[1]**2, sx[1], 1, sy[0]**2+sy[1]**2, sy[1], 1,
+                 sxy[0]**2+sxy[1]**2, sxy[1], 1])
+    m1=matrix(3,[sx[0]**2+sx[1]**2, sx[0], 1, sy[0]**2+sy[1]**2, sy[0], 1,
+                 sxy[0]**2+sxy[1]**2, sxy[0], 1])
+    m2=matrix(3,[sx[0], sx[1], 1, sy[0], sy[1], 1, sxy[0], sxy[1], 1])
+    d=det(m2)*2
+    if d == 0: 
+        return line([sx,sy], **kwds)
+    center=vector((-det(m0)/d,-det(m1)/d))
+    if det(matrix(2,list(sx-center)+list(sy-center)))==0:
+        return line([sx,sy], **kwds)
+    radius=norm(sx-center)
+    e1=_normalize(sx-center)
+    v2=_normalize(sy-center)
+    vxy=_normalize(sxy-center)
+    e2=_normalize(vxy-(vxy*e1)*e1)
+    angle=arccos(e1*vxy)+arccos(vxy*v2)
+    if angle < 0.1 or angle==NaN:
+        return line([sx,sy], **kwds)
+    var('t')
+    p=center+radius*cos(t)*e1+radius*sin(t)*e2
+    return parametric_plot( p, (t, 0, angle), **kwds)
