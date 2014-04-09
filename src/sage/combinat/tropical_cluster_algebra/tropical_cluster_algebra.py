@@ -26,6 +26,9 @@ from sage.rings.infinity import infinity
 from sage.rings.rational_field import QQ
 from sage.modules.free_module_element import vector
 from sage.combinat.subset import Subsets
+from sage.misc.flatten import flatten
+from sage.calculus.var import var
+from sage.symbolic.relation import solve
 
 class TropicalClusterAlgebra(SageObject):
     r"""
@@ -497,6 +500,35 @@ class TropicalClusterAlgebra(SageObject):
 
         return max( -a*b-a*Am*b, -a*b-a*Ap*b, 0 )
 
+    @cached_method
+    def compatible(self,alpha,beta):
+        if self.compatibility_degree(alpha,beta) == 0:
+            return True
+        return False
+
+    @cached_method
+    def exchangeable(self,alpha,beta):
+        ####
+        # We make the same assumptions as in cluster_expansion()
+        ####
+        gamma=self.gamma()
+        gammacheck=gamma.associated_coroot()
+        if gammacheck.scalar(alpha) == 0 and gammacheck.scalar(beta) == 0:
+            rays = flatten([ t[0] for t in self.affine_tubes() ])
+            system = matrix( map( vector, rays ) ).transpose()
+            x = vector( var ( ['x%d'%i for i in range(len(rays))] ) )
+            eqs =  [ (system*x)[i] == vector(alpha+beta)[i] for i in
+                range(self._n)]
+            ieqs = [ y >= 0 for y in x ]
+            solutions = solve( eqs+ieqs, x, solution_dict=True )
+                
+            if solutions: 
+                if len(solutions) > 1 or all( v > 0 for v in solutions[0].values() ):
+                    return False
+        if self.compatibility_degree(alpha,beta) == 1 and self.compatibility_degree(beta,alpha) == 1: 
+            return True
+        return False
+
     def clusters(self, depth=infinity):
         if self._clusters[0] != depth:
 
@@ -529,6 +561,112 @@ class TropicalClusterAlgebra(SageObject):
 
         return copy(self._clusters[1])
 
+    @cached_method
+    def cluster_expansion(self, beta):
+        if beta == 0:
+            return dict()
+        
+        coefficients=beta.monomial_coefficients()
+        if any ( x < 0 for x in coefficients.values() ):
+            alpha = [ -x for x in self.initial_cluster() ]
+            negative_part = dict( [(-alpha[x],-coefficients[x]) for x in
+                    coefficients if coefficients[x] < 0 ] ) 
+            positive_part = sum( [ coefficients[x]*alpha[x] for x in
+                    coefficients if coefficients[x] > 0 ] ) 
+            return dict( negative_part.items() +
+                    self.cluster_expansion(positive_part).items() )
+        
+        if self.is_affine():
+            if self.gamma().associated_coroot().scalar(beta) < 0:
+                shifted_expansion = self.cluster_expansion( self.tau_c()(beta) )
+                return dict( [ (self.tau_c_inverse()(x),shifted_expansion[x]) for x in
+                    shifted_expansion ] )
+            elif self.gamma().associated_coroot().scalar(beta) > 0:
+                shifted_expansion = self.cluster_expansion( self.tau_c_inverse()(beta) )
+                return dict( [ (self.tau_c()(x),shifted_expansion[x]) for x in
+                    shifted_expansion ] )
+            else:
+                ###
+                # Assumptions
+                #
+                # Two cases are possible for vectors in the interior of the cone
+                # according to how many tubes there are:
+                # 1) If there is only one tube then its extremal rays are linearly
+                # independent, therefore a point is in the interior of the cone
+                # if and only if it is a linear combination of all the extremal
+                # rays with strictly positive coefficients. In this case solve()
+                # should produce only one solution.
+                # 2) If there are two or three tubes then the extreme rays are
+                # linearly dependent. A vector is in the interior of the cone if
+                # and only if it can be written as a strictly positive linear
+                # combination of all the rays of at least one tube. In this case
+                # solve() should return at least two solutions.
+                #
+                # If a vector is on one face of the cone than it can be written
+                # uniquely as linear combination of the rays of that face (they
+                # are linearly independent). solve() should return only one
+                # solution no matter how many tubes there are.
+
+                rays = flatten([ t[0] for t in self.affine_tubes() ])
+                system = matrix( map( vector, rays ) ).transpose()
+                x = vector( var ( ['x%d'%i for i in range(len(rays))] ) )
+                eqs =  [ (system*x)[i] == vector(beta)[i] for i in
+                        range(self._n)]
+                ieqs = [ y >= 0 for y in x ]
+                solutions = solve( eqs+ieqs, x, solution_dict=True )
+                
+                if not solutions: 
+                    # we are outside the cone
+                    shifted_expansion = self.cluster_expansion( self.tau_c()(beta) )
+                    return dict( [ (self.tau_c_inverse()(v),shifted_expansion[v]) for v in
+                        shifted_expansion ] )
+                
+                if len(solutions) > 1 or all( v > 0 for v in solutions[0].values() ):
+                    # we are in the interior of the cone
+                    raise ValueError("Vectors in the interior of the cone do "
+                        "not have a cluster expansion")
+               
+                # we are on the boundary of the cone
+                solution_dict=dict( [(rays[i],solutions[0][x[i]]) for i in range(len(rays)) ] )
+                tube_bases = [ t[0] for t in self.affine_tubes() ]
+                connected_components = []
+                index = 0
+                for t in tube_bases:
+                    component = []
+                    for a in t:
+                        if solution_dict[a] == 0:
+                            if component:
+                                connected_components.append( component )
+                                component = []
+                        else: 
+                            component.append( (a,solution_dict[a]) )
+                    if component:
+                        connected_components[index] = ( component + 
+                                connected_components[index] )
+                    index = len(connected_components)
+                expansion = dict()
+                while connected_components:
+                    component = connected_components.pop()
+                    c = min( [ a[1] for a in component] )
+                    expansion[sum( [a[0] for a in component])] = c
+                    component = [ (a[0],a[1]-c) for a in component ]
+                    new_component = []
+                    for a in component:
+                        if a[1] == 0:
+                            if new_component:
+                                connected_components.append( new_component )
+                                new_component = []
+                        else:
+                            new_component.append( a )
+                    if new_component:
+                        connected_components.append( new_component )
+                return expansion
+
+        if self.is_finite():
+            shifted_expansion = self.cluster_expansion( self.tau_c()(beta) )
+            return dict( [ (self.tau_c_inverse()(x),shifted_expansion[x]) for x
+                in shifted_expansion ] )
+
     def plot_cluster_fan_stereographically(self,depth=infinity,northsign=1,north=None,right=None):
         from sage.plot.graphics import Graphics
         from sage.plot.point import point
@@ -538,7 +676,7 @@ class TropicalClusterAlgebra(SageObject):
             raise ValueError("Can only stereographically project fans in 3d.")
         if not self.is_finite() and depth==infinity:
             raise ValueError("For infinite algebras you must specify the depth.")
-        
+
         if north == None:
             if self.is_affine():
                 north = vector(self.delta())
@@ -563,10 +701,10 @@ class TropicalClusterAlgebra(SageObject):
             G += _stereo_arc(vector(u),vector(v),vector(u+v),north=northsign*north,right=right,thickness=0.5,color='black')
 
         for i in range(3):
-            orbit = self.ith_orbit(i,depth=depth)                                                                               
+            orbit = self.ith_orbit(i,depth=depth)
             for j in orbit:
                 G += point(_stereo_coordinates(vector(orbit[j]),north=northsign*north,right=right),color=colors[i],zorder=len(G))
-        
+
         if self.is_affine():
             for v in flatten(self.affine_tubes()):
                 G += point(_stereo_coordinates(vector(v),north=northsign*north,right=right),color=colors[3],zorder=len(G))
@@ -587,7 +725,7 @@ def _stereo_coordinates(x, north=(1,0,0), right=(0,1,0), translation=-1):
     north=_normalize(north)
     right=vector(right)
     right=_normalize(right-(right*north)*north)
-    if norm(right) == 0: 
+    if norm(right) == 0:
         raise ValueError ("Right must not be linearly dependent from north")
     top=north.cross_product(right)
     x=_normalize(x)
@@ -625,7 +763,7 @@ def _stereo_arc(x,y, xy=None,  north=(1,0,0), right=(0,1,0), translation=-1, **k
                  sxy[0]**2+sxy[1]**2, sxy[0], 1])
     m2=matrix(3,[sx[0], sx[1], 1, sy[0], sy[1], 1, sxy[0], sxy[1], 1])
     d=det(m2)*2
-    if d == 0: 
+    if d == 0:
         return line([sx,sy], **kwds)
     center=vector((-det(m0)/d,-det(m1)/d))
     if det(matrix(2,list(sx-center)+list(sy-center)))==0:
