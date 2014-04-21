@@ -641,8 +641,11 @@ class TropicalClusterAlgebra(SageObject):
                         else: 
                             component.append( (a,solution_dict[a]) )
                     if component:
-                        connected_components[index] = ( component + 
-                                connected_components[index] )
+                        if connected_components:
+                            connected_components[index] = ( component + 
+                                    connected_components[index] )
+                        else:
+                            connected_components.append( component ) 
                     index = len(connected_components)
                 expansion = dict()
                 while connected_components:
