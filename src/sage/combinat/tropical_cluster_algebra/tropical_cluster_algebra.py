@@ -37,7 +37,7 @@ class TropicalClusterAlgebra(SageObject):
     The init function should be changed in order to be more consistent with
     ClusterSeed and QuiverMutationType
     """
-    def __init__(self, data, coxeter=None, mutation_type=None):
+    def __init__(self, data, coxeter=None, mutation_type=None, depth=infinity):
         self._mutation_type=mutation_type
         if isinstance(data, Matrix):
             if not data.is_skew_symmetrizable():
@@ -65,9 +65,9 @@ class TropicalClusterAlgebra(SageObject):
                     self._B[coxeter[j],coxeter[i]]=-self._B[coxeter[j],coxeter[i]]
             self._coxeter=copy(coxeter)
         elif type(data) in [QuiverMutationType_Irreducible, QuiverMutationType_Reducible]:
-            self.__init__(data.b_matrix(),mutation_type=data)
+            self.__init__(data.b_matrix(),mutation_type=data, depth=depth)
         elif type(data)==list:
-            self.__init__(CartanType(data),coxeter=coxeter)
+            self.__init__(CartanType(data), coxeter=coxeter, depth=depth)
         else:
             raise ValueError("Input is not valid")
         self._A=CartanMatrix(2-matrix(self._n,map(abs,self._B.list())))
@@ -78,6 +78,7 @@ class TropicalClusterAlgebra(SageObject):
         self._delta=None
         self._gamma=None
         self._affine_tubes=None
+        self._depth=depth
 
     def _repr_(self):
             r"""
@@ -268,6 +269,9 @@ class TropicalClusterAlgebra(SageObject):
                 source=None
         return copy(self._coxeter)
 
+    def set_depth(self,depth):
+        self._depth = depth
+
     @cached_method
     def simple_reflection(self,i):
         return self.root_space().simple_reflection(i)
@@ -366,7 +370,9 @@ class TropicalClusterAlgebra(SageObject):
         else:
             raise ValueError("gamma is defined only for affine types")
 
-    def d_vectors(self,depth=infinity):
+    def d_vectors(self,depth=None):
+        if depth == None:
+            depth = self._depth
         if self._d_vectors[0] == depth:
             return copy(self._d_vectors[1])
 
@@ -390,7 +396,9 @@ class TropicalClusterAlgebra(SageObject):
 
         return copy(self._d_vectors[1])
 
-    def _affine_acyclic_type_d_vectors_iter(self,depth=infinity):
+    def _affine_acyclic_type_d_vectors_iter(self,depth=None):
+        if depth == None:
+            depth = self._depth
         depth_counter=0
         d_vectors={}
         delta=self.delta()
@@ -430,7 +438,9 @@ class TropicalClusterAlgebra(SageObject):
         gammacheck = self.gamma().associated_coroot()
         return [ x for x in classical_roots if gammacheck.scalar(x) == 0 ]
 
-    def ith_orbit(self, i, depth=infinity):
+    def ith_orbit(self, i, depth=None):
+        if depth == None:
+            depth = self._depth
         if depth is infinity and not self.is_finite():
             raise ValueError("d_vectors, for infinite types, can only be computed up to a given depth")
         depth_counter=0
@@ -529,7 +539,9 @@ class TropicalClusterAlgebra(SageObject):
             return True
         return False
 
-    def clusters(self, depth=infinity):
+    def clusters(self, depth=None):
+        if depth == None:
+            depth = self._depth
         if self._clusters[0] != depth:
 
             def compatible_following(l):
@@ -670,13 +682,15 @@ class TropicalClusterAlgebra(SageObject):
             return dict( [ (self.tau_c_inverse()(x),shifted_expansion[x]) for x
                 in shifted_expansion ] )
 
-    def plot_cluster_fan_stereographically(self,depth=infinity,northsign=1,north=None,right=None):
+    def plot_cluster_fan_stereographically(self,depth=None,northsign=1,north=None,right=None):
         from sage.plot.graphics import Graphics
         from sage.plot.point import point
         from sage.misc.flatten import flatten
 
         if self._n !=3:
             raise ValueError("Can only stereographically project fans in 3d.")
+        if depth == None:
+            depth = self._depth
         if not self.is_finite() and depth==infinity:
             raise ValueError("For infinite algebras you must specify the depth.")
 
