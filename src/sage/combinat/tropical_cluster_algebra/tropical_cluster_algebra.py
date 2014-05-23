@@ -11,6 +11,28 @@ AUTHORS:
 #  Distributed under the terms of the GNU General Public License (GPL)
 #                  http://www.gnu.org/licenses/
 #*****************************************************************************
+
+
+#######################
+# Serious Issues
+###
+# * The plot is completely messed up (there might be issues with the relabeling)
+#   It should be fixed: it was a problem in
+#   _affine_acyclic_type_d_vectors_iter()
+#   were I was assuming that the orbits are delta translations instead of
+#   k*delta translations
+#
+#   sage: B=matrix([[0,2,0],[-1,0,1],[0,-2,0]])
+#   sage: T=TropicalClusterAlgebra(B,depth=5)
+#   sage: T.cartan_type()
+#   ['B', 2, 1]^* relabelled by {0: 0, 1: 2, 2: 1}
+#   sage: T.mutation_type()
+#   ['BB', 2, 1]
+#   sage: T
+#   A combinatorial model for a cluster algebra of rank 3 and type ['BB', 2, 1]
+#   sage: G=T.plot_cluster_fan_stereographically()
+
+
 from sage.combinat.root_system.cartan_type import CartanType_abstract, CartanType
 from copy import copy
 from sage.matrix.matrix import Matrix
@@ -29,6 +51,7 @@ from sage.combinat.subset import Subsets
 from sage.misc.flatten import flatten
 from sage.calculus.var import var
 from sage.symbolic.relation import solve
+from sage.rings.integer import Integer
 
 class TropicalClusterAlgebra(SageObject):
     r"""
@@ -38,26 +61,26 @@ class TropicalClusterAlgebra(SageObject):
     ClusterSeed and QuiverMutationType
     """
     def __init__(self, data, coxeter=None, mutation_type=None, depth=infinity):
-        self._mutation_type=mutation_type
+        self._mutation_type = mutation_type
         if isinstance(data, Matrix):
             if not data.is_skew_symmetrizable():
                 raise ValueError("The input must be a skew symmetrizable integer matrix")
-            self._B=copy(data)
-            self._cartan_type=None
-            self._coxeter=None
-            self._n=self._B.ncols()
+            self._B = copy(data)
+            self._cartan_type = None
+            self._coxeter = None
+            self._n = self._B.ncols()
         elif isinstance(data, CartanType_abstract):
-            self._n=data.rank()
+            self._n = data.rank()
             # force labeling to be range(self._n)
             # I should fix this to allow any labeling but I still need to figure
             # out how to deal with matrices (it will require major refactoring)
-            relabeling=dict(zip(data.index_set(),range(self._n)))
+            relabeling = dict(zip(data.index_set(), range(self._n)))
             self._cartan_type=data.relabel(relabeling)
             if coxeter==None:
                 coxeter=list(data.index_set())
             if Set(coxeter)!=Set(data.index_set()):
                 raise ValueError("The Coxeter element need to be a list"
-                                 "permiting the entry of the index set of the Cartan type")
+                                 "permuting the entry of the index set of the Cartan type")
             coxeter=[ relabeling[i] for i in coxeter ]
             self._B=2-data.cartan_matrix()
             for i in range(self._n):
@@ -79,6 +102,7 @@ class TropicalClusterAlgebra(SageObject):
         self._gamma=None
         self._affine_tubes=None
         self._depth=depth
+        self._weight_space=None
 
     def _repr_(self):
             r"""
@@ -107,25 +131,21 @@ class TropicalClusterAlgebra(SageObject):
         """
         if self._quiver is None:
             self._quiver = ClusterQuiver( self._B )
-            # hack: ClusterQuiver can't determine type affine type D so if we
-            # already know the mutation type we do not forget it.
-            # This might create issues with forged imputs
             if self._mutation_type:
                 self._quiver._mutation_type = self._mutation_type
         return self._quiver
 
     def show(self):
+        r"""
+        Display the quiver associated to ``self``
+        """
         self.quiver().show()
 
     def mutation_type(self):
         r"""
         Taken from the cluster algebra package
-        ######
-        ## WARNING: issues with
-        sage: ct=CartanType(['D', 7, 1])
-        sage: T=TropicalClusterAlgebra(ct,[1,7,6,5,4,3,2,0])
-        Apparently D is not a recognized quiver mutation type
-        #####
+
+        WORNING: quiver.mutation_type() is not able to identify type ['D', n, 1]
         """
         if self._mutation_type is None:
             if self._quiver is None:
@@ -231,8 +251,22 @@ class TropicalClusterAlgebra(SageObject):
 
     def root_space(self):
         if self._root_space == None:
-            self._root_space = self.cartan_type().root_system().root_space(QQ)
+            # There is some issue with root_system and root_space, remove this
+            # if (leave only the else)  and run ['B',2,1] to trig it
+            if self._cartan_type != None: 
+                self._root_space = self.cartan_type().root_system().root_space()
+            else:
+                self._root_space = self.cartan_companion().root_system().root_space(QQ)
         return copy(self._root_space)
+
+    def weight_space(self):
+        if self._weight_space == None:
+            # see the issue in root_space
+            if self._cartan_type != None: 
+                self._weight_space = self.cartan_type().root_system().weight_space(QQ)
+            else:
+                self._weight_space = self.cartan_companion().root_system().weight_space(QQ)
+        return copy(self._weight_space)
 
     def initial_cluster(self):
         return [ -v for v in self.root_space().simple_roots() ]
@@ -405,8 +439,7 @@ class TropicalClusterAlgebra(SageObject):
         for v in self.root_space().simple_roots():
             d_vectors[-v]=["forward","backward"]
         for v in self._affine_acyclic_type_classical_roots_in_finite_orbits():
-            d_vectors[v]=[None]
-            d_vectors[delta-v]=[None]
+            d_vectors[v]=["forward"]
         gets_bigger=True
         while gets_bigger and depth_counter <= depth:
             gets_bigger=False
@@ -437,6 +470,48 @@ class TropicalClusterAlgebra(SageObject):
         classical_roots = [ injection(x) for x in crs.positive_roots() ]
         gammacheck = self.gamma().associated_coroot()
         return [ x for x in classical_roots if gammacheck.scalar(x) == 0 ]
+
+    def element_orbit(self, element, depth=None):
+        if depth == None:
+            depth = self._depth
+        if depth is infinity and not self.is_finite():
+            raise ValueError("d_vectors, for infinite types, can only be computed up to a given depth")
+        depth_counter=0
+        orbit={}
+        orbit[0]=element
+        gets_bigger=True
+        while gets_bigger and depth_counter < depth:
+            gets_bigger=False
+            forward=self.tau_c()(orbit[depth_counter])
+            backward=self.tau_c_inverse()(orbit[-depth_counter])
+            if forward != orbit[-depth_counter]:
+                depth_counter+=1
+                orbit[depth_counter]=forward
+                if backward != forward:
+                    orbit[-depth_counter]=backward
+                    gets_bigger=True
+        return orbit
+
+    def orbit(self, element, depth=None):
+        if depth == None:
+            depth = self._depth
+        if depth is infinity and not self.is_finite():
+            raise ValueError("d_vectors, for infinite types, can only be computed up to a given depth")
+        depth_counter=0
+        orbit={}
+        orbit[0]=element
+        gets_bigger=True
+        while gets_bigger and depth_counter < depth:
+            gets_bigger=False
+            forward=self.tau_c()(orbit[depth_counter])
+            backward=self.tau_c_inverse()(orbit[-depth_counter])
+            if forward != orbit[-depth_counter]:
+                depth_counter+=1
+                orbit[depth_counter]=forward
+                if backward != forward:
+                    orbit[-depth_counter]=backward
+                    gets_bigger=True
+        return orbit
 
     def ith_orbit(self, i, depth=None):
         if depth == None:
@@ -494,6 +569,11 @@ class TropicalClusterAlgebra(SageObject):
 
     @cached_method
     def compatibility_degree(self, alpha, beta):
+        r"""
+        Note to self: this almost work also for the cyclic case A_3:
+        the only problems is that the roots \alpha_i+\alpha_j should be
+        compatible with one another but we get 1 instead. 
+        """
         if alpha in self.initial_cluster():
             return max(beta[alpha.support()[0]],0)
 
@@ -531,15 +611,18 @@ class TropicalClusterAlgebra(SageObject):
                 range(self._n)]
             ieqs = [ y >= 0 for y in x ]
             solutions = solve( eqs+ieqs, x, solution_dict=True )
-                
-            if solutions: 
+
+            if solutions:
                 if len(solutions) > 1 or all( v > 0 for v in solutions[0].values() ):
                     return False
-        if self.compatibility_degree(alpha,beta) == 1 and self.compatibility_degree(beta,alpha) == 1: 
+        if self.compatibility_degree(alpha,beta) == 1 and self.compatibility_degree(beta,alpha) == 1:
             return True
         return False
 
     def clusters(self, depth=None):
+        r"""
+        FIXME: handle error id depth is not set
+        """
         if depth == None:
             depth = self._depth
         if self._clusters[0] != depth:
@@ -569,7 +652,7 @@ class TropicalClusterAlgebra(SageObject):
                     else:
                         new.append(clus)
                 clusters = copy(new)
-            self._clusters = [depth,[ x for x in  clusters if len(x) == self._n]]
+            self._clusters = [depth,[ Set(x) for x in  clusters if len(x) == self._n]]
 
         return copy(self._clusters[1])
 
@@ -577,17 +660,17 @@ class TropicalClusterAlgebra(SageObject):
     def cluster_expansion(self, beta):
         if beta == 0:
             return dict()
-        
+
         coefficients=beta.monomial_coefficients()
         if any ( x < 0 for x in coefficients.values() ):
             alpha = [ -x for x in self.initial_cluster() ]
             negative_part = dict( [(-alpha[x],-coefficients[x]) for x in
-                    coefficients if coefficients[x] < 0 ] ) 
+                    coefficients if coefficients[x] < 0 ] )
             positive_part = sum( [ coefficients[x]*alpha[x] for x in
-                    coefficients if coefficients[x] > 0 ] ) 
+                    coefficients if coefficients[x] > 0 ] )
             return dict( negative_part.items() +
                     self.cluster_expansion(positive_part).items() )
-        
+
         if self.is_affine():
             if self.gamma().associated_coroot().scalar(beta) < 0:
                 shifted_expansion = self.cluster_expansion( self.tau_c()(beta) )
@@ -626,18 +709,18 @@ class TropicalClusterAlgebra(SageObject):
                         range(self._n)]
                 ieqs = [ y >= 0 for y in x ]
                 solutions = solve( eqs+ieqs, x, solution_dict=True )
-                
-                if not solutions: 
+
+                if not solutions:
                     # we are outside the cone
                     shifted_expansion = self.cluster_expansion( self.tau_c()(beta) )
                     return dict( [ (self.tau_c_inverse()(v),shifted_expansion[v]) for v in
                         shifted_expansion ] )
-                
+
                 if len(solutions) > 1 or all( v > 0 for v in solutions[0].values() ):
                     # we are in the interior of the cone
                     raise ValueError("Vectors in the interior of the cone do "
                         "not have a cluster expansion")
-               
+
                 # we are on the boundary of the cone
                 solution_dict=dict( [(rays[i],solutions[0][x[i]]) for i in range(len(rays)) ] )
                 tube_bases = [ t[0] for t in self.affine_tubes() ]
@@ -650,14 +733,14 @@ class TropicalClusterAlgebra(SageObject):
                             if component:
                                 connected_components.append( component )
                                 component = []
-                        else: 
+                        else:
                             component.append( (a,solution_dict[a]) )
                     if component:
                         if connected_components:
-                            connected_components[index] = ( component + 
+                            connected_components[index] = ( component +
                                     connected_components[index] )
                         else:
-                            connected_components.append( component ) 
+                            connected_components.append( component )
                     index = len(connected_components)
                 expansion = dict()
                 while connected_components:
@@ -681,11 +764,92 @@ class TropicalClusterAlgebra(SageObject):
             shifted_expansion = self.cluster_expansion( self.tau_c()(beta) )
             return dict( [ (self.tau_c_inverse()(x),shifted_expansion[x]) for x
                 in shifted_expansion ] )
+               
+    def to_g_vector(self,x):
+        weight_space = self.weight_space()        
+        Lambda = weight_space.fundamental_weights()
+        for i in range(self._n):
+            if x == self.initial_cluster()[i]:
+                return Lambda[i]
+        x_coeff=vector([x.coefficient(i) for i in range(self._n)])
+        B = self.b_matrix().list()
+        B = map( lambda t: -min(t,0), B )
+        B = matrix(self._n,B)-1
+        y_coeff = B*x_coeff 
+        return sum([ Lambda[i]*Integer(y_coeff[i]) for i in range(self._n) ])
 
-    def plot_cluster_fan_stereographically(self,depth=None,northsign=1,north=None,right=None):
+    def plot2d(self,depth=None):
+        # FIXME: refactor this before publishing
+        from sage.plot.line import line
+        from sage.plot.graphics import Graphics
+        if self._n !=2:
+            raise ValueError("Can only 2d plot fans.")
+        if depth == None:
+            depth = self._depth
+        if not self.is_finite() and depth==infinity:
+            raise ValueError("For infinite algebras you must specify the depth.")
+
+        colors = dict([(0,'red'),(1,'green')])
+        G = Graphics()
+        for i in range(2):
+            orbit = self.ith_orbit(i,depth=depth)
+            for j in orbit:
+                G += line([(0,0),vector(orbit[j])],color=colors[i],thickness=0.5, zorder=2*j+1)
+    
+        G.set_aspect_ratio(1)
+        G._show_axes = False
+        return G
+
+    def plot3d(self,depth=None):
+        # FIXME: refactor this before publishing
         from sage.plot.graphics import Graphics
         from sage.plot.point import point
         from sage.misc.flatten import flatten
+        from sage.plot.plot3d.shapes2 import sphere
+        if self._n !=3:
+            raise ValueError("Can only 3d plot fans.")
+        if depth == None:
+            depth = self._depth
+        if not self.is_finite() and depth==infinity:
+            raise ValueError("For infinite algebras you must specify the depth.")
+
+        colors = dict([(0,'red'),(1,'green'),(2,'blue'),(3,'cyan')])
+        G = Graphics()
+
+        roots = self.d_vectors(depth=depth)
+        compatible = []
+        while roots:
+            x = roots.pop()
+            for y in roots:
+                if self.compatibility_degree(x,y) == 0:
+                    compatible.append((x,y))
+        for (u,v) in compatible:
+            G += _arc3d((_normalize(vector(u)),_normalize(vector(v))),thickness=0.5,color='black')
+
+        for i in range(3):
+            orbit = self.ith_orbit(i,depth=depth)
+            for j in orbit:
+                G += point(_normalize(vector(orbit[j])),color=colors[i],size=10,zorder=len(G.all))
+
+        if self.is_affine():
+            tube_vectors=map(vector,flatten(self.affine_tubes()))
+            tube_vectors=map(_normalize,tube_vectors)
+            for v in tube_vectors:
+                G += point(v,color=colors[3],size=10,zorder=len(G.all))
+            G += _arc3d((tube_vectors[0],tube_vectors[1]),thickness=5,color='gray',zorder=0)
+        
+        G += sphere((0,0,0),opacity=0.1,zorder=0)
+        G._extra_kwds['frame']=False
+        G._extra_kwds['aspect_ratio']=1 
+        return G
+
+
+    def plot_cluster_fan_stereographically(self, depth=None, northsign=1, north=None, right=None, colors=None):
+        from sage.plot.graphics import Graphics
+        from sage.plot.point import point
+        from sage.misc.flatten import flatten
+        from sage.plot.line import line
+        from sage.misc.functional import norm
 
         if self._n !=3:
             raise ValueError("Can only stereographically project fans in 3d.")
@@ -704,7 +868,8 @@ class TropicalClusterAlgebra(SageObject):
                 right = vector(self.gamma())
             else:
                 right = vector( (1,0,0) )
-        colors = dict([(0,'red'),(1,'green'),(2,'blue'),(3,'cyan')])
+        if colors == None:
+            colors = dict([(0,'red'),(1,'green'),(2,'blue'),(3,'cyan'),(4,'yellow')])
         G = Graphics()
 
         roots = self.d_vectors(depth=depth)
@@ -723,9 +888,19 @@ class TropicalClusterAlgebra(SageObject):
                 G += point(_stereo_coordinates(vector(orbit[j]),north=northsign*north,right=right),color=colors[i],zorder=len(G))
 
         if self.is_affine():
-            for v in flatten(self.affine_tubes()):
-                G += point(_stereo_coordinates(vector(v),north=northsign*north,right=right),color=colors[3],zorder=len(G))
-
+            tube_vectors=map(vector,flatten(self.affine_tubes()))
+            for v in tube_vectors:
+                G += point(_stereo_coordinates(v,north=northsign*north,right=right),color=colors[3],zorder=len(G))
+            if north != vector(self.delta()):
+                G += _stereo_arc(tube_vectors[0],tube_vectors[1],vector(self.delta()),north=northsign*north,right=right,thickness=2,color=colors[4],zorder=0)
+            else:
+                # FIXME: refactor this before publishing
+                tube_projections = [
+                        _stereo_coordinates(v,north=northsign*north,right=right)
+                        for v in tube_vectors ]
+                t=min((G.get_minmax_data()['xmax'],G.get_minmax_data()['ymax']))
+                G += line([tube_projections[0],tube_projections[0]+t*(_normalize(tube_projections[0]-tube_projections[1]))],thickness=2,color=colors[4],zorder=0)
+                G += line([tube_projections[1],tube_projections[1]+t*(_normalize(tube_projections[1]-tube_projections[0]))],thickness=2,color=colors[4],zorder=0)
         G.set_aspect_ratio(1)
         G._show_axes = False
         return G
@@ -759,13 +934,128 @@ def _normalize(x):
         return x
     return vector(x/norm(x))
 
-def _stereo_arc(x,y, xy=None,  north=(1,0,0), right=(0,1,0), translation=-1, **kwds):
-    from sage.misc.functional import norm, det, n
+#def _stereo_arc(x,y, xy=None,  north=(1,0,0), right=(0,1,0), translation=-1, **kwds):
+#    from sage.misc.functional import norm, det, n
+#    from sage.plot.line import line
+#    from sage.plot.plot import parametric_plot
+#    from sage.functions.trig import arccos, cos, sin
+#    from sage.symbolic.constants import NaN
+#    from sage.calculus.var import var
+#    x=vector(x)
+#    y=vector(y)
+#    sx=n(_stereo_coordinates(x, north=north, right=right, translation=translation))
+#    sy=n(_stereo_coordinates(y, north=north, right=right, translation=translation))
+#    if xy == None:
+#        sxy=n(_stereo_coordinates(x+y, north=north, right=right, translation=translation))
+#    else:
+#        sxy=n(_stereo_coordinates(xy, north=north, right=right, translation=translation))
+#    m0=-matrix(3,[sx[0]**2+sx[1]**2, sx[1], 1, sy[0]**2+sy[1]**2, sy[1], 1,
+#                 sxy[0]**2+sxy[1]**2, sxy[1], 1])
+#    m1=matrix(3,[sx[0]**2+sx[1]**2, sx[0], 1, sy[0]**2+sy[1]**2, sy[0], 1,
+#                 sxy[0]**2+sxy[1]**2, sxy[0], 1])
+#    m2=matrix(3,[sx[0], sx[1], 1, sy[0], sy[1], 1, sxy[0], sxy[1], 1])
+#    d=det(m2)*2
+#    if d == 0:
+#        return line([sx,sy], **kwds)
+#    center=vector((-det(m0)/d,-det(m1)/d))
+#    if det(matrix(2,list(sx-center)+list(sy-center)))==0:
+#        return line([sx,sy], **kwds)
+#    radius=norm(sx-center)
+#    e1=_normalize(sx-center)
+#    v2=_normalize(sy-center)
+#    vxy=_normalize(sxy-center)
+#    e2=_normalize(vxy-(vxy*e1)*e1)
+#    angle=arccos(e1*vxy)+arccos(vxy*v2)
+#    if angle < 0.1 or angle==NaN:
+#        return line([sx,sy], **kwds)
+#    var('t')
+#    p=center+radius*cos(t)*e1+radius*sin(t)*e2
+#    return parametric_plot( p, (t, 0, angle), **kwds)
+
+def _arc3d((first_point,second_point),center=(0,0,0),**kwds):
+    # FIXME: refactor this before publishing
+    r"""
+    Usese parametric_plot3d() to plot arcs of a circle.
+    We only plot arcs spanning algles strictly less than pi.
+    """
+    # For sanity purposes convert the input to vectors
+    from sage.misc.functional import norm
+    from sage.modules.free_module_element import vector
+    from sage.functions.trig import arccos, cos, sin 
+    from sage.plot.plot3d.parametric_plot3d import parametric_plot3d
+    center=vector(center)
+    first_point=vector(first_point)
+    second_point=vector(second_point)
+    first_vector=first_point-center
+    second_vector=second_point-center
+    radius=norm(first_vector)
+    if norm(second_vector)!=radius:
+        raise ValueError("Ellipse not implemented")
+    first_unit_vector=first_vector/radius
+    second_unit_vector=second_vector/radius
+    normal_vector=second_vector-(second_vector*first_unit_vector)*first_unit_vector
+    if norm(normal_vector)==0:
+        print (first_point,second_point)
+        return 
+    normal_unit_vector=normal_vector/norm(normal_vector)
+    scalar_product=first_unit_vector*second_unit_vector
+    if abs(scalar_product) == 1:
+        raise ValueError("The points are alligned")
+    angle=arccos(scalar_product)
+    var('t')
+    return parametric_plot3d(center+first_vector*cos(t)+radius*normal_unit_vector*sin(t),(0,angle),**kwds)
+
+
+def _arc(p,q,s,**kwds):
+    from sage.misc.functional import det
     from sage.plot.line import line
-    from sage.plot.plot import parametric_plot
-    from sage.functions.trig import arccos, cos, sin
-    from sage.symbolic.constants import NaN
-    from sage.calculus.var import var
+    from sage.misc.functional import norm
+    from sage.symbolic.all import pi
+    from sage.plot.arc import arc
+
+    p,q,s = map( lambda x: vector(x), [p,q,s])
+
+    # to avoid running into division by 0 we set to be colinear vectors that are
+    # almost colinear
+    if abs(det(matrix([p-s,q-s])))<0.01:
+        return line((p,q),**kwds)
+
+    (cx,cy)=var('cx','cy')
+    equations=[
+            2*cx*(s[0]-p[0])+2*cy*(s[1]-p[1]) == s[0]**2+s[1]**2-p[0]**2-p[1]**2,
+            2*cx*(s[0]-q[0])+2*cy*(s[1]-q[1]) == s[0]**2+s[1]**2-q[0]**2-q[1]**2
+            ]
+    c = vector( [solve( equations, (cx,cy), solution_dict=True )[0][i] for i in [cx,cy]] )
+    
+    r = norm(p-c)
+
+    a_p,a_q,a_s = map( _to_angle, [p-c,q-c,s-c])
+    angles = [a_p,a_q,a_s]
+    angles.sort()
+
+    if a_s == angles[0]:
+        return arc( c, r, angle=angles[2], sector=(0,2*pi-angles[2]+angles[1]), **kwds) 
+    if a_s == angles[1]:
+        return arc( c, r, angle=angles[0], sector=(0,angles[2]-angles[0]), **kwds)
+    if a_s == angles[2]:
+        return arc( c, r, angle=angles[1], sector=(0,2*pi-angles[1]+angles[0]), **kwds) 
+
+def _to_angle((x,y)):
+    from sage.functions.trig import arctan, arccot
+    from sage.symbolic.all import pi
+    if x >= -y and x >= y:
+        return arctan(y/x)
+    if x >= -y and x < y:
+        return arccot(x/y)
+    if x < -y and x < y:
+        return pi+arctan(y/x)
+    if x < -y and x >= y:
+        return pi+arccot(x/y)
+
+
+
+def _stereo_arc(x,y, xy=None,  north=(1,0,0), right=(0,1,0), translation=-1, **kwds):
+    from sage.misc.functional import n
     x=vector(x)
     y=vector(y)
     sx=n(_stereo_coordinates(x, north=north, right=right, translation=translation))
@@ -774,25 +1064,5 @@ def _stereo_arc(x,y, xy=None,  north=(1,0,0), right=(0,1,0), translation=-1, **k
         sxy=n(_stereo_coordinates(x+y, north=north, right=right, translation=translation))
     else:
         sxy=n(_stereo_coordinates(xy, north=north, right=right, translation=translation))
-    m0=-matrix(3,[sx[0]**2+sx[1]**2, sx[1], 1, sy[0]**2+sy[1]**2, sy[1], 1,
-                 sxy[0]**2+sxy[1]**2, sxy[1], 1])
-    m1=matrix(3,[sx[0]**2+sx[1]**2, sx[0], 1, sy[0]**2+sy[1]**2, sy[0], 1,
-                 sxy[0]**2+sxy[1]**2, sxy[0], 1])
-    m2=matrix(3,[sx[0], sx[1], 1, sy[0], sy[1], 1, sxy[0], sxy[1], 1])
-    d=det(m2)*2
-    if d == 0:
-        return line([sx,sy], **kwds)
-    center=vector((-det(m0)/d,-det(m1)/d))
-    if det(matrix(2,list(sx-center)+list(sy-center)))==0:
-        return line([sx,sy], **kwds)
-    radius=norm(sx-center)
-    e1=_normalize(sx-center)
-    v2=_normalize(sy-center)
-    vxy=_normalize(sxy-center)
-    e2=_normalize(vxy-(vxy*e1)*e1)
-    angle=arccos(e1*vxy)+arccos(vxy*v2)
-    if angle < 0.1 or angle==NaN:
-        return line([sx,sy], **kwds)
-    var('t')
-    p=center+radius*cos(t)*e1+radius*sin(t)*e2
-    return parametric_plot( p, (t, 0, angle), **kwds)
+
+    return _arc(sx,sy,sxy,**kwds)
