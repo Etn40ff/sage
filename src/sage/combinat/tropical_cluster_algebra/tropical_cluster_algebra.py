@@ -1007,6 +1007,7 @@ def _arc3d((first_point,second_point),center=(0,0,0),**kwds):
 
 
 def _arc(p,q,s,**kwds):
+    #rewrite this to use polar_plot and get points to do filled triangles
     from sage.misc.functional import det
     from sage.plot.line import line
     from sage.misc.functional import norm
@@ -1061,8 +1062,6 @@ def _stereo_arc(x,y, xy=None,  north=(1,0,0), right=(0,1,0), translation=-1, **k
     sx=n(_stereo_coordinates(x, north=north, right=right, translation=translation))
     sy=n(_stereo_coordinates(y, north=north, right=right, translation=translation))
     if xy == None:
-        sxy=n(_stereo_coordinates(x+y, north=north, right=right, translation=translation))
-    else:
-        sxy=n(_stereo_coordinates(xy, north=north, right=right, translation=translation))
-
+        xy=x+y
+    sxy=n(_stereo_coordinates(xy, north=north, right=right, translation=translation))
     return _arc(sx,sy,sxy,**kwds)
