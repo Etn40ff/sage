@@ -118,6 +118,9 @@ class TropicalClusterAlgebra(SageObject):
         Returns the `B` *-matrix* of ``self``.
         """
         return self._B
+    
+    def euler_matrix(self):
+        return 1+matrix(self._n,map(lambda x: min(x,0),self._B.list()))
 
     def cartan_companion(self):
         r"""
@@ -771,11 +774,8 @@ class TropicalClusterAlgebra(SageObject):
         for i in range(self._n):
             if x == self.initial_cluster()[i]:
                 return Lambda[i]
-        x_coeff=vector([x.coefficient(i) for i in range(self._n)])
-        B = self.b_matrix().list()
-        B = map( lambda t: -min(t,0), B )
-        B = matrix(self._n,B)-1
-        y_coeff = B*x_coeff 
+        x_coeff=vector(x)
+        y_coeff = -self.euler_matrix()*x_coeff 
         return sum([ Lambda[i]*Integer(y_coeff[i]) for i in range(self._n) ])
 
     def plot2d(self,depth=None):
