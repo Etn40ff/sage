@@ -471,3 +471,61 @@ class CoxeterMatrixGroup(FinitelyGeneratedMatrixGroup_generic, UniqueRepresentat
             """
             return self.matrix()
 
+        def c_sorting(self, c):
+            r"""
+            Return a c-sorting word for ``self`` or none if ``self`` is not
+            c-sortable.
+
+            INPUT:
+
+            - ``c`` -- a Coxeter element as a list permuting the entries of the
+              index set
+
+            EXAMPLES:
+
+                sage: W = CoxeterGroup(['A',3], implementation="reflection")
+                sage: w0 = max( W, key=lambda x: len(x.reduced_word()))
+                sage: w0.c_sorting([1,2,3])
+                [1, 2, 3, 1, 2, 1]
+
+            """
+            w = self
+            W = self.parent()
+            from sage.sets.all import Set
+            if Set(c) != Set(W.index_set()):
+                raise ValueError("``c`` must be a permutation of the indexing set of ``self.parent()``.")
+            sortable_word = []
+            s = W.simple_reflections()
+            c.reverse()
+            while c:
+                n = w.length()
+                if n == 0:
+                    return sortable_word
+                i = c.pop()
+                v = s[i]*w
+                if v.length() < n:
+                    c = [i]+c
+                    sortable_word.append(i)
+                    w = v
+            return None
+
+        def is_c_sortable(self, c):
+            r"""
+            Return whether is c-sortable.
+
+            INPUT:
+
+            - ``c`` -- a Coxeter element as a list permuting the entries of the
+              index set
+
+            EXAMPLES:
+
+                sage: W = CoxeterGroup(['A',3], implementation="reflection")
+                sage: w0 = max( W, key=lambda x: len(x.reduced_word()))
+                sage: w0.is_c_sortable([1,2,3])
+                True
+
+            """
+            if self.c_sorting(c) is not None:
+                return True
+            return False
