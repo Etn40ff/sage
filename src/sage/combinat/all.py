@@ -195,3 +195,6 @@ lazy_import('sage.combinat.six_vertex_model', 'SixVertexModel')
 
 # sine-Gordon Y-systems
 lazy_import('sage.combinat.sine_gordon', 'SineGordonYsystem')
+
+# Tropical model for cluster agebras
+from tropical_cluster_algebra.all import *
