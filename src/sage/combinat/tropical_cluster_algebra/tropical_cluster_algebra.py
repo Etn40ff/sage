@@ -32,6 +32,11 @@ AUTHORS:
 #   A combinatorial model for a cluster algebra of rank 3 and type ['BB', 2, 1]
 #   sage: G=T.plot_cluster_fan_stereographically()
 
+######################
+# Note to self:
+# this package can be made input/output agnostic by defining a decorator to take
+# care of the translation. Do this before publishing. Maybe rename g_vectors to
+# variables etc etc
 
 from sage.combinat.root_system.cartan_type import CartanType_abstract, CartanType
 from copy import copy
@@ -74,8 +79,8 @@ class TropicalClusterAlgebra(SageObject):
             self.rk = data.rank()
             
             if Set(data.index_set()) != Set(range(self.rk)):
-                relabelling = dict(zip(range(self.rk),data.index_set()))
-                data.relabel(relabelling)
+                relabelling = dict(zip(data.index_set(),range(self.rk)))
+                data = data.relabel(relabelling)
 
             self.cartan_type.set_cache(data)
             
@@ -108,7 +113,7 @@ class TropicalClusterAlgebra(SageObject):
         if mutation_type:
             self.mutation_type.set_cache(QuiverMutationType(mutation_type))
 
-        self.depth=depth
+        self._depth = depth
     
     def _repr_(self):
             r"""
@@ -118,6 +123,10 @@ class TropicalClusterAlgebra(SageObject):
             if self.mutation_type.is_in_cache():
                 description += ' and type %s' %(self.mutation_type())
             return description
+
+    def set_depth(self, depth):
+        self._depth = depth
+        self.g_vectors.clear_cache()
 
     @cached_method
     def mutation_type(self):
@@ -294,13 +303,13 @@ class TropicalClusterAlgebra(SageObject):
             B[source] = zero_vector
             columns = B.columns()
             source = None
-        return copy(coxeter)
+        return tuple(coxeter)
 
     @cached_method
     def initial_cluster(self):
         cluster = []
         for i in range(self.rk):
-            c = copy(self.coxeter())
+            c = list(self.coxeter())
             c.reverse()
             found = False
             while c:
@@ -311,7 +320,7 @@ class TropicalClusterAlgebra(SageObject):
                 if found:
                     psi = self.simple_reflection(a, psi)
             cluster.append(psi)
-        return cluster
+        return tuple(cluster)
 
     @cached_method
     def simple_roots(self):
@@ -327,7 +336,7 @@ class TropicalClusterAlgebra(SageObject):
 
     @cached_method
     def c(self, v):
-        sequence = copy(self.coxeter())
+        sequence = list(self.coxeter())
         sequence.reverse()
         for i in sequence:
             v = self.simple_reflection(i, v)
@@ -335,328 +344,248 @@ class TropicalClusterAlgebra(SageObject):
 
     @cached_method
     def c_inverse(self, v):
-        sequence = copy(self.coxeter())
+        sequence = list(self.coxeter())
         for i in sequence:
             v = self.simple_reflection(i, v)
         return v
 
-    def _negative_part(self, v):
-        v_m = vector( map(lambda x: min(x,0), v) )
-        return v_m
-
     @cached_method
-    def _alpha_to_psi(self):
-        return -matrix(map(vector,self.initial_cluster())).transpose()
-
-    @cached_method
-    def _psi_to_alpha(self):
-        return self._alpha_to_psi().inverse()
-
-    def _to_root(self, v):
-        alpha = self.simple_roots()
-        return sum( [v[i]*alpha[i] for i in range(self.rk) ])
-
-    @cached_method
-    def twisted_reflection(self, i, v):
-        v = copy(v)
-        psi = T.initial_cluster()
-        c = copy(self.coxeter())
-        c.reverse()
-        negative_part = {}
+    def tau_c(self, v):
+        c = list(self.coxeter())
+        psi = self.initial_cluster()
+        psi_p = map(lambda x: -self.c(x), psi)
+        v = self.c(v)
+        v_n = 0
         while c:
-            a = c.pop()
-            d = min(v.coefficient(a),0)
-            v = v + d*psi[a]
-            negative_part.update({a:d})
-        print negative_part
-        print v
-        v = T.simple_reflection(i, v)
-        x =  -negative_part[i]
-        negative_part[i] = 0
-        print negative_part
-        return v + sum( [psi[i]*negative_part[i] for i in range(self.rk) ]) + alpha[i] * x
+            i = c.pop()
+            d = min(v[i],0)
+            v_n += d*psi[i]
+            v += d*psi_p[i]
+        return v - v_n
+    
+    @cached_method
+    def tau_c_inverse(self, v):
+        c = list(self.coxeter())
+        c.reverse()
+        psi = self.initial_cluster()
+        v_n = 0
+        while c:
+            i = c.pop()
+            d = -min(v[i],0)
+            v_n += d*psi[i]
+            v -= d*psi[i]
+        return self.c_inverse(v) - v_n
 
     @cached_method
-    def twisted_reflections(self):
-        sigmas = {}
-        for i in range(self.rk):
-            def sigma(v):
-                return self.twisted_reflection(i, v)
-            sigmas.update({i:sigma})
-        return Family(sigmas)
-
-
-    @cached_method
-    def tau_c(self):
-        def f(v):
-            sequence=self.coxeter()
-            sequence.reverse()
-            for i in sequence:
-                v=self.twisted_reflection(i)(v)
-            return v
-        return f
-
-    @cached_method
-    def tau_c_inverse(self):
-        def f(v):
-            sequence=self.coxeter()
-            for i in sequence:
-                v=self.twisted_reflection(i)(v)
-            return v
-        return f
-
     def delta(self):
         """r
         Assume roots are labeled by range(self._n)
         """
-        if self._delta:
-            return self._delta
         if self.is_affine():
             annihilator_basis = self.cartan_companion().transpose().integer_kernel().gens()
-            self._delta = sum(
-                    annihilator_basis[0][i]*self.root_space().simple_root(i)
-                    for i in range(self._n) )
-            return  self._delta
+            delta = sum(
+                    annihilator_basis[0][i]*self.simple_roots()[i]
+                    for i in range(self.rk) )
+            return delta
         else:
             raise ValueError("delta is defined only for affine types")
-
+    
+    @cached_method
     def gamma(self):
         """r
         Assume roots are labeled by range(self._n)
         Return the generalized eigenvector of the cartan matrix of eigenvalue 1
         in the span of the finite root system
         """
-        if self._gamma:
-            return self._gamma
         if self.is_affine():
-            C = map( lambda x: vector(self.c()(x)), self.root_space().simple_roots() )
+            C = [ self.c(x) for x in self.simple_roots() ]
+            C = map(vector, C)
             C = matrix(C).transpose()
             delta = vector(self.delta())
             gamma = (C-1).solve_right(delta)
+            # the following two lines could probably ve replaced by the
+            # assumption i0 = 0
             ct = self.cartan_type()
             i0 = [ i for i in ct.index_set() if i not in ct.classical().index_set() ][0]
             gamma = gamma-gamma[i0]/delta[i0]*delta
-            self._gamma = sum( [ gamma[i]*self.root_space().simple_root(i) for
-                i in range(self._n) ] )
-            return self._gamma
+            gamma = sum( [ gamma[i]*self.simple_roots()[i] for i in range(self.rk) ] )
+            return gamma
         else:
             raise ValueError("gamma is defined only for affine types")
 
-    def d_vectors(self,depth=None):
-        if depth == None:
-            depth = self._depth
-        if self._d_vectors[0] == depth:
-            return copy(self._d_vectors[1])
-
+    @cached_method
+    def g_vectors(self):
         if self.is_finite():
-            if self.is_acyclic():
-                self._d_vectors[0] = infinity
-                self._d_vectors[1] = self.root_space().almost_positive_roots()
-            else:
-                raise ValueError("Not implemented yet")
+            g_vectors = self._g_vector_iter()
         elif self.is_affine():
-            if self.is_acyclic():
-                if depth is infinity:
-                    raise ValueError("d_vectors, for affine types, can only be "
-                                     "computed up to a given depth")
-                self._d_vectors[0] = depth
-                self._d_vectors[1] = list( S for S in self._affine_acyclic_type_d_vectors_iter(depth=depth))
+            if self._depth != infinity:
+                g_vectors = self._g_vector_iter()
             else:
-                raise ValueError("There is no theory for cyclic affine types yet")
+                raise ValueError("d_vectors, for affine types, can only be computed up to a finite depth")
         else:
             raise ValueError("Not implemented yet")
+        return tuple([ v for v in g_vectors ])
 
-        return copy(self._d_vectors[1])
-
-    def _affine_acyclic_type_d_vectors_iter(self,depth=None):
-        if depth == None:
-            depth = self._depth
-        depth_counter=0
-        d_vectors={}
-        delta=self.delta()
-        for v in self.root_space().simple_roots():
-            d_vectors[-v]=["forward","backward"]
-        for v in self._affine_acyclic_type_classical_roots_in_finite_orbits():
-            d_vectors[v]=["forward"]
-        gets_bigger=True
+    def _g_vector_iter(self):
+        depth = self._depth
+        depth_counter = 0
+        g_vectors = {}
+        for v in self.initial_cluster():
+            g_vectors[v] = ["forward", "backward"]
+        if self.is_affine():
+            for v in self.tubes_transversal():
+                g_vectors[v] = ["forward", "backward"]
+        gets_bigger = True
         while gets_bigger and depth_counter <= depth:
-            gets_bigger=False
-            constructed_vectors = d_vectors.keys()
+            gets_bigger = False
+            constructed_vectors = g_vectors.keys()
             for v in constructed_vectors:
-                directions=d_vectors[v]
+                directions = g_vectors[v]
                 while directions:
-                    next_move=directions.pop()
+                    next_move = directions.pop()
                     if next_move == "forward":
-                        next_vector =  self.tau_c()(v)
-                        if next_vector not in d_vectors.keys():
-                            d_vectors[next_vector]=["forward"]
-                            gets_bigger=True
+                        next_vector =  self.tau_c(v)
+                        if next_vector not in g_vectors.keys():
+                            g_vectors[next_vector] = ["forward"]
+                            gets_bigger = True
                     if next_move == "backward":
-                        next_vector = self.tau_c_inverse()(v)
-                        if next_vector not in d_vectors.keys():
-                            d_vectors[next_vector]=["backward"]
-                            gets_bigger=True
+                        next_vector = self.tau_c_inverse(v)
+                        if next_vector not in g_vectors.keys():
+                            g_vectors[next_vector] = ["backward"]
+                            gets_bigger = True
                     if directions:
                         continue
                     yield v
-            depth_counter+=1
+            depth_counter += 1
 
-    def _affine_acyclic_type_classical_roots_in_finite_orbits(self):
+    @cached_method
+    def _positive_classical_roots_in_finite_orbits(self):
+        if not self.is_affine(): 
+            raise ValueError("Method defined only for affine algebras")
         rs = self.root_space()
         crs = rs.classical()
         injection = crs.module_morphism(on_basis=lambda i: rs.simple_root(i),codomain=rs)
         classical_roots = [ injection(x) for x in crs.positive_roots() ]
         gammacheck = self.gamma().associated_coroot()
-        return [ x for x in classical_roots if gammacheck.scalar(x) == 0 ]
+        return tuple([ x for x in classical_roots if gammacheck.scalar(x) == 0 ])
 
-    def element_orbit(self, element, depth=None):
-        if depth == None:
-            depth = self._depth
-        if depth is infinity and not self.is_finite():
-            raise ValueError("d_vectors, for infinite types, can only be computed up to a given depth")
-        depth_counter=0
-        orbit={}
-        orbit[0]=element
-        gets_bigger=True
-        while gets_bigger and depth_counter < depth:
-            gets_bigger=False
-            forward=self.tau_c()(orbit[depth_counter])
-            backward=self.tau_c_inverse()(orbit[-depth_counter])
-            if forward != orbit[-depth_counter]:
-                depth_counter+=1
-                orbit[depth_counter]=forward
-                if backward != forward:
-                    orbit[-depth_counter]=backward
-                    gets_bigger=True
-        return orbit
-
-    def orbit(self, element, depth=None):
-        if depth == None:
-            depth = self._depth
-        if depth is infinity and not self.is_finite():
-            raise ValueError("d_vectors, for infinite types, can only be computed up to a given depth")
-        depth_counter=0
-        orbit={}
-        orbit[0]=element
-        gets_bigger=True
-        while gets_bigger and depth_counter < depth:
-            gets_bigger=False
-            forward=self.tau_c()(orbit[depth_counter])
-            backward=self.tau_c_inverse()(orbit[-depth_counter])
-            if forward != orbit[-depth_counter]:
-                depth_counter+=1
-                orbit[depth_counter]=forward
-                if backward != forward:
-                    orbit[-depth_counter]=backward
-                    gets_bigger=True
-        return orbit
-
-    def ith_orbit(self, i, depth=None):
-        if depth == None:
-            depth = self._depth
-        if depth is infinity and not self.is_finite():
-            raise ValueError("d_vectors, for infinite types, can only be computed up to a given depth")
-        depth_counter=0
-        orbit={}
-        orbit[0]=self.initial_cluster()[i]
-        gets_bigger=True
-        while gets_bigger and depth_counter < depth:
-            gets_bigger=False
-            forward=self.tau_c()(orbit[depth_counter])
-            backward=self.tau_c_inverse()(orbit[-depth_counter])
-            if forward != orbit[-depth_counter]:
-                depth_counter+=1
-                orbit[depth_counter]=forward
-                if backward != forward:
-                    orbit[-depth_counter]=backward
-                    gets_bigger=True
-        return orbit
-
-    def affine_tubes(self):
-        if self._affine_tubes:
-            return copy(self._affine_tubes)
+    @cached_method
+    def tubes_transversal(self):
         if not self.is_affine():
-            raise ValueError("Tubes exist only when the type of self is affine")
-        finite_roots = self._affine_acyclic_type_classical_roots_in_finite_orbits()
-        sums = [ x+y for (x,y) in Subsets(finite_roots,2) ]
-        simple_roots=[ x for x in finite_roots if x not in sums]
-        tau=self.tau_c()
-        tau_inv=self.tau_c_inverse()
-        initial_roots=[ x for x in simple_roots if tau_inv(x) not in simple_roots ]
-        tubes=[]
-        for a in initial_roots:
-            layer=[a]
-            h=0
-            x=tau(a)
-            while x != a:
-                h+=1
-                layer.append(x)
-                x=tau(x)
-            tube=[layer]
-            for i in range(1,h):
-                a=tube[i-1][0]+tube[0][i]
-                layer=[a]
-                x=tau(a)
-                while x != a:
-                    layer.append(x)
-                    x=tau(x)
-                tube.append(layer)
-            tubes.append(tube)
-        self._affine_tubes=tubes
-        return copy(self._affine_tubes)
+            raise ValueError("Transversal for tubes can be computed only in affine type")
+        roots = self._positive_classical_roots_in_finite_orbits()
+        transversal = [ x for x in roots if self.tau_c_inverse(x) not in roots]
+        return tuple(transversal)
+
+    @cached_method
+    def tubes_bases(self):
+        if not self.is_affine():
+            raise ValueError("The bases of the tubes can be computed only in affine type")
+        roots = self._positive_classical_roots_in_finite_orbits()
+        sums = [ x+y for (x,y) in Subsets(roots, 2) ]
+        simple_roots = [ x for x in roots if x not in sums]
+        starting_points = [ x for x in simple_roots if x in self.tubes_transversal() ]
+        bases = []
+        for x in starting_points:
+            done = False
+            y = x
+            basis = [ x ]
+            while not done:
+                y = self.tau_c(y)
+                if y not in basis:
+                    basis.append(y)
+                else:
+                    done = True
+            bases.append(tuple(basis))
+        return tuple(bases)
+
+    @cached_method
+    def affine_tubes(self):
+        tubes = []
+        bases = self.tubes_bases()
+        for basis in bases:
+            tube = [ basis ]
+            length = len(basis)
+            for i in range(1, length-1):
+                layer = [ tube[-1][j] + basis[(j+i) % length] for j in range(length) ]
+                tube.append(tuple(layer))
+            tubes.append(tuple(tube))
+        return tuple(tubes)
+
+    def orbit(self, element):
+        depth = self._depth
+        if depth is infinity and not self.is_finite():
+            raise ValueError("g_vectors, for infinite types, can only be computed up to a given depth")
+        depth_counter = 0
+        orbit = {}
+        orbit[0] = element
+        gets_bigger = True
+        while gets_bigger and depth_counter < depth:
+            gets_bigger = False
+            forward = self.tau_c(orbit[depth_counter])
+            backward = self.tau_c_inverse(orbit[-depth_counter])
+            if forward != orbit[-depth_counter]:
+                depth_counter += 1
+                orbit[depth_counter] = forward
+                if backward != forward:
+                    orbit[-depth_counter] = backward
+                    gets_bigger = True
+        return orbit
+
+    def ith_orbit(self, i):
+        return self.orbit(self.initial_cluster()[i])
 
     @cached_method
     def compatibility_degree(self, alpha, beta):
-        r"""
-        Note to self: this almost work also for the cyclic case A_3:
-        the only problems is that the roots \alpha_i+\alpha_j should be
-        compatible with one another but we get 1 instead. 
-        """
-        if alpha in self.initial_cluster():
-            return max(beta[alpha.support()[0]],0)
+        if self.is_finite():
+            tube_contribution = -1
+        elif self.is_affine():
+            gck = self.gamma().associated_coroot()
+            if any([gck.scalar(alpha) != 0, gck.scalar(beta) != 0]):
+                tube_contribution = -1
+            else:
+                sup_a = [ x for x in flatten(self.tubes_bases()) if (alpha-x).is_positive_root() ]
+                sup_b = [ x for x in flatten(self.tubes_bases()) if (beta-x).is_positive_root() ]
+                if all([x in sup_b for x in sup_a]) or all([x in sup_a for x in sup_b]):
+                    tube_contribution = -1
+                else:
+                    nbh_a = [ self.tau_c(x) for x in sup_a if self.tau_c(x) not in sup_a ]
+                    nbh_a += [ self.tau_c_inverse(x) for x in sup_a if self.tau_c_inverse(x) not in sup_a ]
+                    nbh_a = Set(nbh_a)
+                    tube_contribution = len([ x for x in nbh_a if x in sup_b ])
+        else:
+            raise ValueError("compatibility degree is implemented only for finite and affine types")
+        
+        initial = self.initial_cluster()
+        if alpha in initial:
+            return max(beta[initial.index(alpha)],0)
 
         alphacheck = alpha.associated_coroot()
 
-        if beta in self.initial_cluster():
-            return max(alphacheck[beta.support()[0]],0)
+        if beta in initial:
+            return max(alphacheck[initial.index(beta)],0)
 
-        Ap = -matrix(self._n, map(lambda x: max(x,0), self.b_matrix().list() ) )
-        Am =  matrix(self._n, map(lambda x: min(x,0), self.b_matrix().list() ) )
+        Ap = -matrix(self.rk, map(lambda x: max(x,0), self.b_matrix().list() ) )
+        Am =  matrix(self.rk, map(lambda x: min(x,0), self.b_matrix().list() ) )
 
         a = vector(alphacheck)
         b = vector(beta)
 
-        return max( -a*b-a*Am*b, -a*b-a*Ap*b, 0 )
+        return max( -a*b-a*Am*b, -a*b-a*Ap*b, tube_contribution )
 
     @cached_method
-    def compatible(self,alpha,beta):
-        if self.compatibility_degree(alpha,beta) == 0:
+    def compatible(self, alpha, beta):
+        if self.compatibility_degree(alpha, beta) == 0:
             return True
         return False
 
     @cached_method
-    def exchangeable(self,alpha,beta):
-        ####
-        # We make the same assumptions as in cluster_expansion()
-        ####
-        gamma=self.gamma()
-        gammacheck=gamma.associated_coroot()
-        if gammacheck.scalar(alpha) == 0 and gammacheck.scalar(beta) == 0:
-            rays = flatten([ t[0] for t in self.affine_tubes() ])
-            system = matrix( map( vector, rays ) ).transpose()
-            x = vector( var ( ['x%d'%i for i in range(len(rays))] ) )
-            eqs =  [ (system*x)[i] == vector(alpha+beta)[i] for i in
-                range(self._n)]
-            ieqs = [ y >= 0 for y in x ]
-            solutions = solve( eqs+ieqs, x, solution_dict=True )
-
-            if solutions:
-                if len(solutions) > 1 or all( v > 0 for v in solutions[0].values() ):
-                    return False
-        if self.compatibility_degree(alpha,beta) == 1 and self.compatibility_degree(beta,alpha) == 1:
+    def exchangeable(self, alpha, beta):
+        if self.compatibility_degree(alpha, beta) == 1 and self.compatibility_degree(beta, alpha) == 1:
             return True
         return False
 
+##### Reviewed up to here 
     def clusters(self, depth=None):
         r"""
         FIXME: handle error id depth is not set
@@ -879,18 +808,16 @@ class TropicalClusterAlgebra(SageObject):
         return G
 
 
-    def plot_cluster_fan_stereographically(self, depth=None, northsign=1, north=None, right=None, colors=None):
+    def plot_cluster_fan_stereographically(self, northsign=1, north=None, right=None, colors=None):
         from sage.plot.graphics import Graphics
         from sage.plot.point import point
         from sage.misc.flatten import flatten
         from sage.plot.line import line
         from sage.misc.functional import norm
 
-        if self._n !=3:
+        if self.rk !=3:
             raise ValueError("Can only stereographically project fans in 3d.")
-        if depth == None:
-            depth = self._depth
-        if not self.is_finite() and depth==infinity:
+        if not self.is_finite() and self._depth == infinity:
             raise ValueError("For infinite algebras you must specify the depth.")
 
         if north == None:
@@ -907,7 +834,7 @@ class TropicalClusterAlgebra(SageObject):
             colors = dict([(0,'red'),(1,'green'),(2,'blue'),(3,'cyan'),(4,'yellow')])
         G = Graphics()
 
-        roots = self.d_vectors(depth=depth)
+        roots = list(self.g_vectors())
         compatible = []
         while roots:
             x = roots.pop()
@@ -918,12 +845,12 @@ class TropicalClusterAlgebra(SageObject):
             G += _stereo_arc(vector(u),vector(v),vector(u+v),north=northsign*north,right=right,thickness=0.5,color='black')
 
         for i in range(3):
-            orbit = self.ith_orbit(i,depth=depth)
+            orbit = self.ith_orbit(i)
             for j in orbit:
                 G += point(_stereo_coordinates(vector(orbit[j]),north=northsign*north,right=right),color=colors[i],zorder=len(G))
 
         if self.is_affine():
-            tube_vectors=map(vector,flatten(self.affine_tubes()))
+            tube_vectors = map(vector,flatten(self.affine_tubes()))
             for v in tube_vectors:
                 G += point(_stereo_coordinates(v,north=northsign*north,right=right),color=colors[3],zorder=len(G))
             if north != vector(self.delta()):
