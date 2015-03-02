@@ -142,8 +142,59 @@ class TropicalClusterAlgebra(SageObject):
     def b_matrix(self, cluster='initial'):
         if cluster=='initial':
             return self.B0
-        #to be implemented: return the b-matrix of any cluster
+       
+        #review this part (fix sign)
+        exchange = []
+        for v in cluster:
+            ex_v = [ x for x in self.g_vectors() if self.are_exchangeable(v,x) ]
+            ex_v = [ x for x in ex_v if all([self.are_compatible(x,y) for y in cluster if y != v]) ]
+            if len(ex_v) != 1:
+                print (v,ex_v)
+                raise ValueError("Did not find exchange, increase depth")
+            exchange.append(ex_v[0])
+        vectors = []
+        for (v,w) in zip(cluster, exchange):
+            sign = self.exchange_sign(v,w)
+            tsum = self.twisted_sum(v,w)
+            vectors.append(vector(sign*(v+w-tsum)))
+        V = matrix(vectors).transpose()
+        C = matrix(map(vector,cluster)).inverse().transpose()
+        return C*V
     
+    @cached_method
+    def exchange_sign(self, alpha, beta):
+        if alpha in self.initial_cluster():
+            return -1
+        if beta in self.initial_cluster():
+            return 1
+        
+        if self.is_finite():
+            tau = self.tau_c
+        elif self.is_affine():
+            gck = self.gamma().associated_coroot()
+            if alpha.scalar(gck) > 0 or beta.scalar(gck) > 0:
+                tau = self.tau_c_inverse
+            elif alpha.scalar(gck) < 0 or beta.scalar(gck) < 0:
+                tau = self.tau_c
+            else:
+                sup_a = self._tube_support(alpha)
+                sup_b = self._tube_support(beta)
+                sup_a_red = [ x for x in sup_a if x not in sup_b ]
+                if any( [ self.tau_c(x) in sup_b for x in sup_a_red ] ): 
+                    return -1
+                else:
+                    return 1
+        else:
+            raise ValueError("Sign function defined only for finite and affine algebras")
+        
+        ta = tau(alpha)
+        tb = tau(beta)
+        if ta + tb == tau(alpha+beta):
+            sign = 1
+        else:
+            sign = -1
+        return sign*self.exchange_sign(ta,tb)
+
     @cached_method
     def euler_matrix(self):
         return 1+matrix(self.rk,map(lambda x: min(x,0),self.B0.list()))
@@ -536,6 +587,28 @@ class TropicalClusterAlgebra(SageObject):
         return self.orbit(self.initial_cluster()[i])
 
     @cached_method
+    def _tube_support(self, alpha):
+        gck = self.gamma().associated_coroot()
+        if gck.scalar(alpha) != 0:
+            raise ValueError("Root not in U_c")
+        tubes = list(self.affine_tubes())
+        ack = alpha.associated_coroot()
+        while tubes:
+            tube = tubes.pop()
+            if any([ack.scalar(x) != 0 for x in tube[0]]):
+                sup_a = []
+                roots = flatten(tube)+[0]
+                basis = tube[0]
+                a = copy(alpha)
+                while a != 0:
+                    edges = [ x for x in basis if a-x in roots ]
+                    sup_a += edges
+                    while edges:
+                        a = a-edges.pop()
+                return tuple(sup_a)
+        raise ValueError("Unable to compute support of root")
+
+    @cached_method
     def compatibility_degree(self, alpha, beta):
         if self.is_finite():
             tube_contribution = -1
@@ -544,8 +617,8 @@ class TropicalClusterAlgebra(SageObject):
             if any([gck.scalar(alpha) != 0, gck.scalar(beta) != 0]):
                 tube_contribution = -1
             else:
-                sup_a = [ x for x in flatten(self.tubes_bases()) if (alpha-x).is_positive_root() ]
-                sup_b = [ x for x in flatten(self.tubes_bases()) if (beta-x).is_positive_root() ]
+                sup_a = self._tube_support(alpha)
+                sup_b = self._tube_support(beta)
                 if all([x in sup_b for x in sup_a]) or all([x in sup_a for x in sup_b]):
                     tube_contribution = -1
                 else:
@@ -574,16 +647,52 @@ class TropicalClusterAlgebra(SageObject):
         return max( -a*b-a*Am*b, -a*b-a*Ap*b, tube_contribution )
 
     @cached_method
-    def compatible(self, alpha, beta):
+    def are_compatible(self, alpha, beta):
         if self.compatibility_degree(alpha, beta) == 0:
             return True
         return False
 
     @cached_method
-    def exchangeable(self, alpha, beta):
+    def are_exchangeable(self, alpha, beta):
         if self.compatibility_degree(alpha, beta) == 1 and self.compatibility_degree(beta, alpha) == 1:
             return True
         return False
+    
+    @cached_method
+    def twisted_sum(self, alpha, beta):
+        if not self.are_exchangeable(alpha, beta):
+            raise ValueError("The roots are not exchangeable")
+        if self.is_affine():
+            gck = self.gamma().associated_coroot()
+            if alpha.scalar(gck) > 0 or beta.scalar(gck) > 0:
+                tau = self.tau_c_inverse
+                tau_i = self.tau_c
+            elif alpha.scalar(gck) < 0 or beta.scalar(gck) < 0:
+                tau = self.tau_c
+                tau_i = self.tau_c_inverse
+            else:
+                return 0
+        elif self.is_finite():
+            tau = self.tau_c
+            tau_i = self.tau_c_inverse
+        else:
+            raise ValueError("Not implemented")
+        count = 1
+        s1 = tau(alpha+beta)
+        ta = tau(alpha)
+        tb = tau(beta)
+        while s1 == ta + tb:
+            count += 1
+            s1 = tau(s1)
+            ta = tau(ta)
+            tb = tau(tb)
+        s2 = ta + tb
+        for i in range(count):
+            s2 = tau_i(s2)
+        return s2
+
+
+            
 
 ##### Reviewed up to here 
     def clusters(self, depth=None):
