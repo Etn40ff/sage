@@ -609,6 +609,14 @@ class TropicalClusterAlgebra(SageObject):
         raise ValueError("Unable to compute support of root")
 
     @cached_method
+    def _tube_nbh(self, alpha):
+        sup_a = self._tube_support(alpha)
+        nbh_a = [ self.tau_c(x) for x in sup_a if self.tau_c(x) not in sup_a ]
+        nbh_a += [ self.tau_c_inverse(x) for x in sup_a if self.tau_c_inverse(x) not in sup_a ]
+        nbh_a = Set(nbh_a)
+        return tuple(nbh_a)
+
+    @cached_method
     def compatibility_degree(self, alpha, beta):
         if self.is_finite():
             tube_contribution = -1
@@ -622,9 +630,7 @@ class TropicalClusterAlgebra(SageObject):
                 if all([x in sup_b for x in sup_a]) or all([x in sup_a for x in sup_b]):
                     tube_contribution = -1
                 else:
-                    nbh_a = [ self.tau_c(x) for x in sup_a if self.tau_c(x) not in sup_a ]
-                    nbh_a += [ self.tau_c_inverse(x) for x in sup_a if self.tau_c_inverse(x) not in sup_a ]
-                    nbh_a = Set(nbh_a)
+                    nbh_a = self._tube_nbh(alpha)
                     tube_contribution = len([ x for x in nbh_a if x in sup_b ])
         else:
             raise ValueError("compatibility degree is implemented only for finite and affine types")
@@ -648,7 +654,7 @@ class TropicalClusterAlgebra(SageObject):
 
     @cached_method
     def are_compatible(self, alpha, beta):
-        if self.compatibility_degree(alpha, beta) == 0:
+        if self.compatibility_degree(alpha, beta) <= 0:
             return True
         return False
 
@@ -671,7 +677,14 @@ class TropicalClusterAlgebra(SageObject):
                 tau = self.tau_c
                 tau_i = self.tau_c_inverse
             else:
-                return 0
+                sup_a = self._tube_support(alpha)
+                nbh_a = self._tube_nbh(alpha)
+                sup_b = self._tube_support(beta)
+                nbh_b = self._tube_nbh(beta)
+                contrib_a = [x for x in sup_a if x not in sup_b + nbh_b]
+                contrib_b = [x for x in sup_b if x not in sup_a + nbh_a]
+                return sum(contrib_a+contrib_b)
+                
         elif self.is_finite():
             tau = self.tau_c
             tau_i = self.tau_c_inverse
