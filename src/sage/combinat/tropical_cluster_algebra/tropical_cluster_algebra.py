@@ -150,7 +150,7 @@ class TropicalClusterAlgebra(SageObject):
             ex_v = [ x for x in ex_v if all([self.are_compatible(x,y) for y in cluster if y != v]) ]
             if len(ex_v) != 1:
                 print (v,ex_v)
-                raise ValueError("Did not find exchange, increase depth")
+                raise ValueError("Did not find exchange. Try increasing depth")
             exchange.append(ex_v[0])
         vectors = []
         for (v,w) in zip(cluster, exchange):
