@@ -17,7 +17,8 @@ from sage.categories.rings import Rings
 from sage.misc.misc_c import prod
 from copy import copy
 from sage.functions.other import binomial
-
+from sage.modules.free_module_element import vector
+from sage.functions.generalized import sign
 
 ################################################################################
 # Elements of a cluster algebra
