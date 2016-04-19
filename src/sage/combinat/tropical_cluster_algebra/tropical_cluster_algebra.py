@@ -511,7 +511,7 @@ class TropicalClusterAlgebra(SageObject):
 
     @cached_method
     def _positive_classical_roots_in_finite_orbits(self):
-        if not self.is_affine(): 
+        if not self.is_affine():
             raise ValueError("Method defined only for affine algebras")
         rs = self.root_space()
         crs = rs.classical()
@@ -704,6 +704,15 @@ class TropicalClusterAlgebra(SageObject):
             s2 = tau_i(s2)
         return s2
 
+    def to_weight(self,x):
+        weight_space = self.weight_space()
+        Lambda = weight_space.fundamental_weights()
+        for i in range(self.rk):
+            if x == self.initial_cluster()[i]:
+                return Lambda[i]
+        x_coeff=vector(x)
+        y_coeff = -self.euler_matrix()*x_coeff
+        return sum([ Lambda[i]*Integer(y_coeff[i]) for i in range(self.rk) ])
 
             
 
@@ -930,7 +939,7 @@ class TropicalClusterAlgebra(SageObject):
         return G
 
 
-    def plot_cluster_fan_stereographically(self, northsign=1, north=None, right=None, colors=None):
+    def plot_cluster_fan_stereographically(self, northsign=1, north=None, right=None, colors=None, d_vectors=False):
         from sage.plot.graphics import Graphics
         from sage.plot.point import point
         from sage.misc.flatten import flatten
@@ -960,14 +969,24 @@ class TropicalClusterAlgebra(SageObject):
         compatible = []
         while roots:
             x = roots.pop()
+            if x in self.initial_cluster() and d_vectors:
+                x1 = -self.simple_roots()[list(self.initial_cluster()).index(x)]
+            else:
+                x1 = x
             for y in roots:
                 if self.compatibility_degree(x,y) == 0:
-                    compatible.append((x,y))
+                    if y in self.initial_cluster() and d_vectors:
+                        y1 = -self.simple_roots()[list(self.initial_cluster()).index(y)]
+                    else:
+                        y1 = y
+                    compatible.append((x1,y1))
         for (u,v) in compatible:
             G += _stereo_arc(vector(u),vector(v),vector(u+v),north=northsign*north,right=right,thickness=0.5,color='black')
 
         for i in range(3):
             orbit = self.ith_orbit(i)
+            if d_vectors: 
+                orbit[0] = -self.simple_roots()[list(self.initial_cluster()).index(orbit[0])]
             for j in orbit:
                 G += point(_stereo_coordinates(vector(orbit[j]),north=northsign*north,right=right),color=colors[i],zorder=len(G))
 
@@ -1114,30 +1133,11 @@ def _arc(p,q,s,**kwds):
     
     r = norm(p-c)
 
-    a_p,a_q,a_s = map( _to_angle, [p-c,q-c,s-c])
-    angles = [a_p,a_q,a_s]
-    angles.sort()
-
-    if a_s == angles[0]:
-        return arc( c, r, angle=angles[2], sector=(0,2*pi-angles[2]+angles[1]), **kwds) 
-    if a_s == angles[1]:
-        return arc( c, r, angle=angles[0], sector=(0,angles[2]-angles[0]), **kwds)
-    if a_s == angles[2]:
-        return arc( c, r, angle=angles[1], sector=(0,2*pi-angles[1]+angles[0]), **kwds) 
-
-def _to_angle((x,y)):
-    from sage.functions.trig import arctan, arccot
-    from sage.symbolic.all import pi
-    if x >= -y and x >= y:
-        return arctan(y/x)
-    if x >= -y and x < y:
-        return arccot(x/y)
-    if x < -y and x < y:
-        return pi+arctan(y/x)
-    if x < -y and x >= y:
-        return pi+arccot(x/y)
-
-
+    a_p, a_q, a_s = map(lambda x: atan2(x[1],x[0]), [p-c,q-c,s-c])
+    a_p, a_q = sorted([a_p,a_q])
+    if a_s < a_p or a_s > a_q:
+        return arc( c, r, angle=a_q, sector=(0,2*pi-a_q+a_p), **kwds)
+    return arc( c, r, angle=a_p, sector=(0,a_q-a_p), **kwds)
 
 def _stereo_arc(x,y, xy=None,  north=(1,0,0), right=(0,1,0), translation=-1, **kwds):
     from sage.misc.functional import n
