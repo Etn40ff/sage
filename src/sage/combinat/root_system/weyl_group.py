@@ -41,7 +41,7 @@ from sage.groups.matrix_gps.finitely_generated import FinitelyGeneratedMatrixGro
 from sage.groups.matrix_gps.group_element import MatrixGroupElement_gap
 from sage.rings.all import ZZ, QQ
 from sage.interfaces.gap import gap
-from sage.misc.cachefunc import cached_method, ClearCacheOnPickle
+from sage.misc.cachefunc import cached_method
 from sage.combinat.root_system.cartan_type import CartanType
 from sage.combinat.root_system.cartan_matrix import CartanMatrix
 from sage.matrix.constructor import matrix, diagonal_matrix
@@ -196,7 +196,7 @@ def WeylGroup(x, prefix=None):
     return WeylGroup_gens(ct.root_system().root_space(), prefix=prefix)
 
 
-class WeylGroup_gens(ClearCacheOnPickle, UniqueRepresentation,
+class WeylGroup_gens(UniqueRepresentation,
                      FinitelyGeneratedMatrixGroup_gap):
 
     @staticmethod
@@ -359,17 +359,26 @@ class WeylGroup_gens(ClearCacheOnPickle, UniqueRepresentation,
             sage: [r+refdict[r].action(r) for r in refdict.keys()]
             [(0, 0), (0, 0), (0, 0), (0, 0)]
 
+            sage: W = WeylGroup(['A',2,1], prefix="s")
+            sage: W.reflections()
+            Lazy family (real root to reflection(i))_{i in
+                        Positive real roots of type ['A', 2, 1]}
+
+        TESTS::
+
+            sage: CM = CartanMatrix([[2,-6],[-1,2]])
+            sage: W = WeylGroup(CM, prefix='s')
+            sage: W.reflections()
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: only implemented for finite and affine Cartan types
         """
-        ret = {}
-        try:
-            for alp in self.domain().positive_roots():
-                m = Matrix([self.domain().reflection(alp)(x).to_vector()
-                            for x in self.domain().basis()])
-                r = self(m)
-                ret[alp] = r
-            return Family(ret)
-        except Exception:
-            raise NotImplementedError("reflections are only implemented for finite Weyl groups")
+        prr = self.domain().positive_real_roots()
+        def to_elt(alp):
+            ref = self.domain().reflection(alp)
+            m = Matrix([ref(x).to_vector() for x in self.domain().basis()])
+            return self(m.transpose())
+        return Family(prr, to_elt, name="real root to reflection")
 
     def _repr_(self):
         """
@@ -757,7 +766,7 @@ class WeylGroupElement(MatrixGroupElement_gap):
             return ret + "%s%d"%(self._parent._prefix, redword[-1])
 
     def _latex_(self):
-        """
+        r"""
         Return the latex representation of ``self``.
 
         EXAMPLES::
